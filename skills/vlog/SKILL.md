@@ -13,7 +13,7 @@ Produce a rendered explainer video in which the speaker's own digital-twin avata
 
 | Pipeline Area | Status | Notes |
 | :--- | :--- | :--- |
-| Stages 1–9 (research, script, recording, transcription, edit, verify, listening) | Exercised in one production | A ~17-minute Chinese technical explainer; `vlog edit` reproduces that production's edit sample for sample |
+| Stages 1–9 (research, script, recording, transcription, edit, verify, listening) | Exercised in one production | A ~18-minute Chinese technical explainer; `vlog edit` reproduces that production's edit sample for sample |
 | Stage 10, HeyGen (web UI or official CLI with OAuth) | Exercised in that production | Full-length render in the web UI; a 60-second test through the official CLI with OAuth (see "Avatar video with HeyGen") |
 | Stage 11 (picture clock) | Exercised in the first production | `vlog offset` found 160 ms of drift in the Video Agent render; the picture is timed from its transcript |
 | Stages 12–13 (storyboard, look development, B-roll) | Exercised in the first production, second pass | A per-line illustration pass was rejected after a 3 min 52 s checkpoint; the second pass (argument-map canvas) covered the full film and went through one independent cognitive-load review before the owner's review |
@@ -134,14 +134,14 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
 - **Artifact**: `avatar/avatar.mp4`
 - **Acceptance Criteria**:
   1. `avatar/avatar.mp4` exists and `ffprobe` confirms valid video and audio streams whose duration matches `audio/edited.wav` within 0.2 s.
-  2. The offset between the avatar video's audio track and `audio/edited.wav`, measured by cross-correlation, is recorded (it was 0 ms in the one test so far).
+  2. The offset between the avatar video's audio track and `audio/edited.wav` is measured with `vlog offset` (Stage 11). It was 0 ms for a 60 s direct CLI render; a full-length Video Agent render drifted to -160 ms and finished 0.2 s short, so treat a duration mismatch near 0.2 s as drift to handle in Stage 11, not as a failure.
 
 ### Stage 11: Picture Clock
 - **Goal**: Establish a single timing reference that stays locked to the spoken words in `avatar/avatar.mp4` from start to end, accounting for any scene-stitching drift introduced by the avatar renderer.
 - **Artifact**: Offset measurements from `vlog offset`, and the picture-clock transcript plus resolved phrase timestamps from `vlog anchors` (derived from `avatar/avatar.mp4` whenever the avatar audio drifts from `audio/edited.wav`).
 - **Acceptance Criteria**:
   - Alignment between `audio/edited.wav` and `avatar/avatar.mp4` is measured at the start, middle, and end of the program with `vlog offset audio/edited.wav avatar/avatar.mp4 --at <start> <middle> <end>`.
-  - If the offset is zero throughout (as observed on a 60 s direct CLI render), the edited-audio transcript can drive the picture clock.
+  - `asr/avatar.json` is always written: transcribe `avatar/avatar.mp4` (or, when the offset is zero throughout, as observed on a 60 s direct CLI render, copy the edited-audio transcript). Later stages read only this file.
   - If the offset is non-zero or changes over time (in the first production, a stitched Video Agent render measured 0 ms at 5 s, -92 ms at 500 s, and -160 ms at 1000 s, finishing 0.2 s shorter overall), `avatar/avatar.mp4` is transcribed directly and all visual cues (`vlog anchors`) and subtitles are timed from the avatar video's transcript rather than `audio/edited.wav`.
   - Every animation entrance and subtitle cue matches the spoken words in `avatar/avatar.mp4` across the full duration without cumulative drift.
 
@@ -171,11 +171,12 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
   4. Procedural frame sequences and music beds are produced using the sibling skill at `https://github.com/grapeot/opus-video-audio-skill`.
 - **Advice**: Treat image-model illustration plates as optional; rely primarily on programmatic diagrams and tables for the map and stage layers, and generate an illustration plate only when it communicates a relationship more clearly than a diagram.
 
-### Stage 14: Compose and Render (Planned — Not Implemented in v0.1)
+### Stage 14: Compose and Render (Not Implemented in the CLI)
 - **Goal**: Composite the avatar video, B-roll overlays, burned-in and muxed subtitles, sound effects, and ducked music bed into a final video normalized to -16 LUFS integrated loudness.
 - **Artifacts**: `render/timeline.json`, `render/final.mp4`
 - **Acceptance Criteria**:
   1. `render/final.mp4` exists, `ffmpeg` `ebur128` integrated loudness is `-16.0 +/- 0.5` LUFS, subtitles are both burned in and muxed as a stream, and audio/video stream durations match.
+  2. If a speed change was requested, it is applied last to picture and sound together, and the subtitle times are divided by the same factor (see "Pace adjustment and the one-clock rule").
 
 ### Stage 15: Final QA (Checkpoint 5)
 - **Goal**: Verify the final render for visual defects, sync drift, and audio truncation before human sign-off.
@@ -321,7 +322,7 @@ Not yet exercised: audio over 32 MB through the CLI (`heygen asset direct-upload
 
 ### Why per-line illustration failed in the first checkpoint
 
-The first production was an approximately 18-minute Chinese explainer with a layered argument: a general question, three complaints, the finding that reading code is three different jobs, each complaint mapping to one job, one section per job with its own mechanism, and a conclusion.
+The first production was a ~18-minute (17 min 43 s) Chinese explainer with a layered argument: a general question, three complaints, the finding that reading code is three different jobs, each complaint mapping to one job, one section per job with its own mechanism, and a conclusion.
 
 The first rendered checkpoint (the opening 3 min 52 s) followed a per-line illustration approach: for each line or few lines, an engraving-style illustration plate (a desk with a paper stack, a code page with a magnifier, a form with a rubber stamp, a three-strand rope, an antique key) paired with a short serif caption that typed on when the speaker said the keyword, with the speaker's video in a framed side panel and burned-in subtitles. The render was technically clean: it ran at 8x real time and captions were anchored to the spoken words.
 
@@ -376,6 +377,8 @@ An independent reviewer checks stills each round using a cognitive-load rubric r
 7. If a playback speed factor `<factor>` is applied, intermediate renders and anchors match the original `asr/avatar.json` clock, and the final output applies `setpts=PTS/<factor>`, `atempo=<factor>`, and subtitle timestamps divided by `<factor>`.
 
 ## Picture: look development and rendering
+
+This section records the first, plate-based pass. Its plate rules apply whenever illustration plates are used; the rubric for the picture as a whole is the cognitive-load rubric in the previous section, which replaces "the picture explains the line".
 
 ### Splitting plates and code
 
@@ -437,14 +440,14 @@ The owner slightly preferred the Python output, so the first production used Pyt
 
 ### Acceptance Criteria
 
-An agent can verify look development and rendering against these checks:
+An agent can verify look development and rendering against these checks (the plate and typography checks apply when plates are used):
 
 - **No whole-frame generation**: Every figurative asset is an isolated illustration plate without text; all text, numbers, tables, arrows, boundaries, and animations are rendered by code.
 - **No visible plate bounding boxes**: Every plate's background paper is normalised and clamped to exact white, its edges are feathered, it is multiplied onto the page, and no colour wash reveals its rectangle.
 - **Measured anchors**: Every caption or overlay attached to a plate feature derives its coordinates from the plate's actual pixel dimensions and measured ink features, and every timed entrance is anchored to a transcript phrase timestamp from the picture clock.
 - **Publication typography and plate-derived overlays**: Captions use serif type with hand-ruled underlines rather than bordered boxes, and boundaries over organic plates are computed from the plate's pixels rather than drawn as straight lines.
 - **Single colour meaning**: Every colour used in the code maps to its documented role across the film, with red appearing only on the single problem element in a frame.
-- **Recorded reviewer loop**: Look-development stills of key beats have been critiqued by an independent reviewer agent with rubric scores recorded per round before human sign-off.
+- **Recorded reviewer loop**: Stills of key beats have been critiqued by an independent reviewer agent against the cognitive-load rubric, with scores recorded per round before human sign-off.
 - **Unmodified A-roll colour by default**: The speaker's video retains its original colour unless the human explicitly requested grading.
 
 ---
@@ -479,12 +482,12 @@ An agent can verify look development and rendering against these checks:
 | 12 | A trailing fragment of a deleted word (half a syllable) survived at a join, and the re-transcription did not show it | The fragment was too short for ASR to emit a word, so `vlog verify` reported the join as clean | Treat a clean verify as necessary, not sufficient; when a cut edge sits close to speech energy, check the `vlog quiet` envelope at that edge, and keep the human listening checkpoint. |
 | 13 | Direct avatar render looks jumpy | Avatar III direct render loops the training footage; seams every ~30 s | Render the final A-roll with Video Agent; check any render with frame differences or by watching, not only its audio. |
 | 14 | Picture and words drift apart over a long avatar video | Video Agent stitches scenes; audio drifted up to 160 ms over 17 minutes | `vlog offset`; if not aligned, time the picture from a transcript of the avatar video. |
-| 15 | Subtitle cues ended or began with a single character ("特别便" then "宜") | Greedy packing up to a width limit splits a clause at an arbitrary character | Split clauses into the fewest near-equal pieces; never cross a sentence end (now the behaviour of `vlog subtitles`). |
-| 16 | A glossary entry did not match | ASR wrote "A B赛马" with a space between Latin letters | Add the spaced form to the glossary. |
+| 15 | Subtitle cues ended or began with a single character ("非常麻" then "烦"; illustrative) | Greedy packing up to a width limit splits a clause at an arbitrary character | Split clauses into the fewest near-equal pieces; never cross a sentence end (now the behaviour of `vlog subtitles`). |
+| 16 | A glossary entry did not match | ASR wrote spaced Latin letters ("X Y" for "XY") inside Chinese text | Add the spaced form to the glossary. |
 | 17 | Look-development frames read as a slide deck pasted onto an engraving | Boxes, straight geometric overlays, colour washes, guessed positions | Independent reviewer every round; captions not boxes; derive overlays from the plate; measure positions from the plate. |
 | 18 | A parallel frame render hung with no output and no error | On macOS, `multiprocessing` starts workers by re-importing the main module; a render script without an `if __name__ == "__main__":` guard re-ran itself in every worker | Put the entry point behind the guard. With it, 232 s of 1080p25 rendered in 29 s on 8 workers. |
-| 19 | Underlines cut through descenders (the "p" in "ship it") on centred captions | Text was measured with a centre anchor but drawn with a left anchor, so the two disagreed vertically | Measure and draw text with the same anchor; compute the left edge from the text width for centred captions. |
+| 19 | Underlines cut through descenders (the "p" in an English label) on centred captions | Text was measured with a centre anchor but drawn with a left anchor, so the two disagreed vertically | Measure and draw text with the same anchor; compute the left edge from the text width for centred captions. |
 | 20 | Viewer cannot follow a multi-layer argument despite clean per-line illustrations and word-anchored captions ("visuals for visuals' sake") | Storyboard attached an illustration plate and caption to nouns in each spoken line instead of mapping the structure of the argument | Extract `storyboard/argument_map.md` before drawing; make a two-layer canvas the main subject (a persistent high-level map layer that zooms out at section starts and rolls up takeaways at section ends, plus a low-level stage layer for the current claim); keep the speaker in a small fixed box after the opening; cut any visual that only depicts a spoken noun rather than encoding a relationship |
-| 21 | A subtitle cue broke a Chinese word in two ("机" at the end of one cue, "器" at the start of the next) | CJK aligners emit one character per word, so a balanced split could land between two characters of one word | `vlog subtitles` now moves each cut up to four characters to land after a particle, before a common clause opener (然后, 但是, 所以 ...), or at a change of script, never before a particle, and checks that the remainder still fits. |
+| 21 | A subtitle cue broke a Chinese word in two (the first character of a two-character word at the end of one cue, the second at the start of the next) | CJK aligners emit one character per word, so a balanced split could land between two characters of one word | `vlog subtitles` now chooses all cuts of a long clause together: every piece fits `max_width`, pieces stay near-equal, cuts are pulled toward a particle, a common clause opener (然后, 但是, 所以 ...) or a change of script and away from a following particle, and no cut falls inside a glossary key. This lowers, but does not remove, the chance of a mid-word cut. |
 | 22 | The reviewer read a red cross beside "double check" as "double check is wrong", although double check was the answer to an earlier row | A rejection mark was put on the concept rather than on its limitation in this context | In a contrast, mark the limitation in words ("same angle: cannot see beyond the diff"); keep red for the frame's single problem and audit every frame for a second red. |
 | 23 | Audio checks against the avatar track showed correlation 0.7 at 0 ms offset after adding a title card in front | ffmpeg `adelay=3000` delays only the first channel of stereo audio; the downmix mixed delayed and undelayed channels | Use `adelay=<ms>:all=1` when delaying a stereo track (the render used it; the check command had not). |

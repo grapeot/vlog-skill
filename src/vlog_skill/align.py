@@ -15,7 +15,7 @@ import numpy as np
 from .audio import load_audio
 
 SR = 8000
-_SKIP = set(" ，。？！；：、,.?!;:\"'“”‘’（）()")
+_SKIP = set(" \u3000，。？！；：、,.?!;:\"'“”‘’（）()…—《》「」【】·")
 
 
 def offset_at(reference: str, other: str, at: float, window: float = 30.0) -> dict:
@@ -57,6 +57,8 @@ def anchors(words: list[dict], phrases: dict[str, str], after: float = 0.0, unti
     out, missing = {}, []
     for name, phrase in phrases.items():
         p = strip(phrase)
+        if not p:
+            raise ValueError(f"anchor {name!r}: phrase {phrase!r} is empty once spaces and punctuation are removed")
         pos, found = 0, None
         while True:
             k = text.find(p, pos)

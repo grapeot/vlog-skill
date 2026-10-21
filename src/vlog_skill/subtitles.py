@@ -64,40 +64,60 @@ def _cut_penalty(words: list[dict], k: int) -> int:
     return 2
 
 
-def _split_balanced(words: list[dict], max_width: float, glossary: dict) -> list[list[dict]]:
-    """Split one clause into the fewest near-equal pieces that fit, so no piece is a one-character orphan,
-    moving each cut up to a few characters to land on a likely word boundary."""
-    def width(ws):
-        return _width(apply_glossary(_join_words(ws), glossary))
+def _glossary_cuts(words: list[dict], glossary: dict) -> set[int]:
+    """Cut positions that would fall inside a glossary key, which would put the raw ASR error on screen."""
+    joined = _join_words(words)
+    bounds = [len(_join_words(words[:k])) for k in range(len(words) + 1)]
+    bad = set()
+    for key in glossary:
+        st = joined.find(key)
+        while st >= 0:
+            bad.update(k for k in range(1, len(words)) if st < bounds[k] < st + len(key))
+            st = joined.find(key, st + 1)
+    return bad
 
-    total = width(words)
-    n = max(1, int(np.ceil(total / max_width)))
-    if n == 1:
+
+def _split_balanced(words: list[dict], max_width: float, glossary: dict) -> list[list[dict]]:
+    """Split one clause into the fewest pieces that each fit max_width, choosing all cuts together: pieces
+    stay near-equal (no one-character orphan), cuts prefer likely word boundaries, and no cut falls inside
+    a glossary key."""
+    m = len(words)
+    cache: dict[tuple[int, int], float] = {}
+
+    def width(a: int, b: int) -> float:
+        if (a, b) not in cache:
+            cache[(a, b)] = _width(apply_glossary(_join_words(words[a:b]), glossary))
+        return cache[(a, b)]
+
+    total = width(0, m)
+    if total <= max_width or m < 2:
         return [words]
-    target = total / n
-    pieces, start = [], 0
-    for j in range(1, n):
-        best = None
-        for k in range(start + 1, len(words)):
-            w_piece = width(words[start:k])
-            if w_piece > max_width:
-                break
-            done = width(words[:k])
-            off = abs(done - target * j)
-            if off > 4 or (j == n - 1 and total - done > max_width):
-                continue
-            cost = off + 1.5 * _cut_penalty(words, k)
-            if best is None or cost < best[0]:
-                best = (cost, k)
-        if best is None:  # no cut near the target fits; fall back to the first point past it
-            k = start + 1
-            while k < len(words) - 1 and width(words[:k]) < target * j:
-                k += 1
-            best = (0, k)
-        pieces.append(words[start:best[1]])
-        start = best[1]
-    pieces.append(words[start:])
-    return [p for p in pieces if p]
+    bad = _glossary_cuts(words, glossary)
+    penalty = [0] + [_cut_penalty(words, k) for k in range(1, m)] + [0]
+    inf = float("inf")
+    for n in range(max(2, int(np.ceil(total / max_width))), m + 1):
+        target = total / n
+        best = [[inf] * (m + 1) for _ in range(n + 1)]
+        back = [[0] * (m + 1) for _ in range(n + 1)]
+        best[0][0] = 0.0
+        for j in range(1, n + 1):
+            for k in ([m] if j == n else range(j, m)):
+                if k in bad:
+                    continue
+                cost = 0.0 if k == m else abs(width(0, k) - target * j) + 1.5 * penalty[k]
+                for a in range(k - 1, j - 2, -1):
+                    if width(a, k) > max_width:
+                        break
+                    if best[j - 1][a] + cost < best[j][k]:
+                        best[j][k], back[j][k] = best[j - 1][a] + cost, a
+        if best[n][m] < inf:
+            cuts, k = [], m
+            for j in range(n, 0, -1):
+                cuts.append(k)
+                k = back[j][k]
+            cuts = [0] + cuts[::-1]
+            return [words[cuts[i]:cuts[i + 1]] for i in range(n)]
+    return [[w] for w in words]  # a single word wider than max_width
 
 
 def build_cues(words: list[dict], max_width: float = 22.0, min_duration_s: float = 0.8, glossary: dict | None = None) -> list[dict]:

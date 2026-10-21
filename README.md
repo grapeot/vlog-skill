@@ -10,7 +10,7 @@ Engineers and technical authors who use coding agents to produce narrated explai
 
 ## Scope and Validation Status
 
-`vlog-skill` was extracted from one real production: a ~17-minute Chinese technical explainer on how to do code review when AI writes code faster than people can read it. Everything not exercised in that production is marked **untested** or **planned**.
+`vlog-skill` was extracted from one real production: a ~18-minute Chinese technical explainer on how to do code review when AI writes code faster than people can read it. Everything not exercised in that production is marked **untested** or **planned**.
 
 | Component | Status | Details |
 | :--- | :--- | :--- |
