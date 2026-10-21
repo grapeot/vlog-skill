@@ -2,8 +2,7 @@
 
 Success: {"command": ..., "ok": true, "data": {...}}
 Failure: {"command": ..., "ok": false, "error": {"type", "message", "details"}}
-Exit codes: 0 ok, 2 usage, 3 missing dependency or credential, 4 bad input, 5 upstream failure
-(HeyGen HTTP error or failed render, ffmpeg error).
+Exit codes: 0 ok, 2 usage, 3 missing dependency, 4 bad input, 5 external tool failure (ffmpeg).
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from pathlib import Path
 from . import __version__
 from .audio import DependencyError, ToolError
 
-EXIT_OK, EXIT_USAGE, EXIT_DEPENDENCY, EXIT_INPUT, EXIT_UPSTREAM = 0, 2, 3, 4, 5
+EXIT_OK, EXIT_USAGE, EXIT_DEPENDENCY, EXIT_INPUT, EXIT_TOOL = 0, 2, 3, 4, 5
 
 
 class UsageError(Exception):
@@ -31,35 +30,10 @@ class JsonArgumentParser(argparse.ArgumentParser):
         raise UsageError(f"{self.prog}: {message}")
 
 
-_ENV_FILES = [Path(".env")]
-
-
-def _secrets() -> list[str]:
-    import os
-
-    values = [os.environ.get("HEYGEN_API_KEY", "")]
-    try:
-        from .heygen import _from_env_file
-
-        for env_file in _ENV_FILES:
-            if env_file.is_file():
-                values.append(_from_env_file(env_file) or "")
-    except Exception:  # noqa: BLE001 - scrubbing must never fail the command
-        pass
-    out = set()
-    for v in values:
-        if v and len(v.strip()) >= 6:
-            out.update({v, v.strip(), repr(v.encode())[2:-1]})
-    return sorted(out, key=len, reverse=True)
-
-
 def _emit(command: str, data: dict | None = None, error: dict | None = None) -> None:
     env = {"command": command, "ok": error is None}
     env["data" if error is None else "error"] = data if error is None else error
-    text = json.dumps(env, ensure_ascii=False, indent=2)
-    for secret in _secrets():  # an API key must never reach stdout, even inside an error message
-        text = text.replace(secret, "***").replace(json.dumps(secret)[1:-1], "***")
-    sys.stdout.write(text + "\n")
+    sys.stdout.write(json.dumps(env, ensure_ascii=False, indent=2) + "\n")
 
 
 def _write_json(path: str | Path, doc: dict) -> None:
@@ -140,35 +114,6 @@ def cmd_subtitles(a) -> dict:
     return {"out": a.out, "cues": len(cues), "short_cues": [{"start": round(c["start"], 2), "text": c["text"]} for c in short]}
 
 
-def cmd_heygen(a) -> dict:
-    from .heygen import Client, api_key
-
-    _ENV_FILES.append(Path(a.env_file))
-    c = Client(api_key(a.env_file))
-    if a.heygen_cmd == "me":
-        return c.me()
-    if a.heygen_cmd == "looks":
-        return c.looks(a.avatar_type, a.ownership, a.limit)
-    if a.heygen_cmd == "upload":
-        return c.upload(a.audio)
-    if a.heygen_cmd == "create":
-        return c.create(a.avatar_id, a.audio_asset_id, a.audio_url, a.engine, a.resolution, a.aspect_ratio,
-                        a.format, a.title, a.callback_url, a.idempotency_key)
-    if a.heygen_cmd == "status":
-        return c.status(a.video_id)
-    if a.heygen_cmd == "wait":
-        resp = c.wait(a.video_id, a.timeout, a.interval)
-        if str(Client._data(resp).get("status", "")).lower() == "failed":
-            from .heygen import UpstreamError
-
-            raise UpstreamError(None, json.dumps(resp, ensure_ascii=False), f"{c.base_url}/v3/videos/{a.video_id}")
-        return resp
-    if a.heygen_cmd == "download":
-        resp = c.download(a.video_id, a.out)
-        return {"out": a.out, "status": resp}
-    raise ValueError(f"unknown heygen command {a.heygen_cmd}")
-
-
 def build_parser() -> argparse.ArgumentParser:
     p = JsonArgumentParser(prog="vlog", description=__doc__.splitlines()[0])
     p.add_argument("--version", action="version", version=__version__)
@@ -227,36 +172,6 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-width", type=float, default=22.0)
     s.set_defaults(func=cmd_subtitles)
 
-    s = sub.add_parser("heygen", help="HeyGen v3: own avatar, own audio, download")
-    s.add_argument("--env-file", default=".env")
-    hs = s.add_subparsers(dest="heygen_cmd", required=True)
-    hs.add_parser("me")
-    h = hs.add_parser("looks")
-    h.add_argument("--avatar-type", default="digital_twin")
-    h.add_argument("--ownership", default="private")
-    h.add_argument("--limit", type=int, default=50)
-    h = hs.add_parser("upload")
-    h.add_argument("audio")
-    h = hs.add_parser("create")
-    h.add_argument("--avatar-id", required=True)
-    h.add_argument("--audio-asset-id")
-    h.add_argument("--audio-url")
-    h.add_argument("--engine", help="for example avatar_v, avatar_iv, avatar_iii")
-    h.add_argument("--resolution")
-    h.add_argument("--aspect-ratio")
-    h.add_argument("--format", choices=["mp4", "webm"])
-    h.add_argument("--title")
-    h.add_argument("--callback-url")
-    h.add_argument("--idempotency-key")
-    for name in ("status", "wait", "download"):
-        h = hs.add_parser(name)
-        h.add_argument("video_id")
-        if name == "wait":
-            h.add_argument("--timeout", type=float, default=7200)
-            h.add_argument("--interval", type=float, default=30)
-        if name == "download":
-            h.add_argument("--out", required=True)
-    s.set_defaults(func=cmd_heygen)
     return p
 
 
@@ -269,26 +184,17 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
     except SystemExit as exc:  # --help and --version print text for humans
         return EXIT_USAGE if exc.code not in (0, None) else EXIT_OK
-    command = args.command + (f" {args.heygen_cmd}" if getattr(args, "heygen_cmd", None) else "")
+    command = args.command
     try:
         _emit(command, args.func(args))
         return EXIT_OK
     except DependencyError as exc:
         _emit(command, error={"type": "DependencyError", "message": str(exc), "details": None})
         return EXIT_DEPENDENCY
-    except Exception as exc:  # noqa: BLE001 - pass every upstream detail through
-        from .heygen import UpstreamError
-
-        if isinstance(exc, TimeoutError):
-            _emit(command, error={"type": "TimeoutError", "message": str(exc), "details": None})
-            return EXIT_UPSTREAM
+    except Exception as exc:  # noqa: BLE001 - pass every detail through
         if isinstance(exc, ToolError):
             _emit(command, error={"type": "ToolError", "message": str(exc), "details": None})
-            return EXIT_UPSTREAM
-        if isinstance(exc, UpstreamError):
-            _emit(command, error={"type": "UpstreamError", "message": str(exc),
-                                  "details": {"status": exc.status, "body": exc.body, "url": exc.url}})
-            return EXIT_UPSTREAM
+            return EXIT_TOOL
         _emit(command, error={"type": type(exc).__name__, "message": str(exc), "details": traceback.format_exc(limit=3)})
         return EXIT_INPUT
 

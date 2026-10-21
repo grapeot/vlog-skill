@@ -6,11 +6,9 @@ import numpy as np
 import pytest
 
 from synth import SR, dominant_freq, transcript, write_project
-from test_heygen_cli import Recorder
 from vlog_skill import cli
-from vlog_skill.audio import DependencyError, load_audio
+from vlog_skill.audio import load_audio
 from vlog_skill.edit import load_plan, render
-from vlog_skill.heygen import Client, api_key
 from vlog_skill.subtitles import build_cues
 from vlog_skill.verify import verify
 
@@ -78,32 +76,6 @@ def test_no_lead_in_keeps_word_times_exact(tmp_path):
     assert abs(onset - w["start"]) < 0.015
 
 
-def test_key_with_whitespace_never_reaches_stdout(capsys, monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("HEYGEN_API_KEY", "sk-secret value")
-    with pytest.raises(DependencyError) as exc:
-        api_key()
-    assert "secret" not in str(exc.value)
-    monkeypatch.setenv("HEYGEN_API_KEY", "sk-secretvalue\n")
-    assert api_key() == "sk-secretvalue"
-    cli._emit("x", error={"type": "E", "message": "bad header b'sk-secretvalue\\n'", "details": "sk-secretvalue"})
-    assert "sk-secretvalue" not in capsys.readouterr().out
-
-
-def test_direct_upload_sets_content_type_and_m4a_is_rejected(tmp_path, monkeypatch):
-    import vlog_skill.heygen as hg
-
-    monkeypatch.setattr(hg, "SIMPLE_UPLOAD_MAX_BYTES", 1)
-    f = tmp_path / "a.wav"
-    f.write_bytes(b"RIFF")
-    rec = Recorder([{"data": {"asset_id": "a", "upload_url": "https://u.example/x", "upload_headers": {}}}, b"", {"data": None}])
-    out = Client("k", opener=rec).upload(f)
-    assert rec.requests[1].headers["Content-type"] == "audio/wav" and out["data"]["asset_id"] == "a"
-    (tmp_path / "a.m4a").write_bytes(b"x")
-    with pytest.raises(ValueError):
-        Client("k", opener=Recorder([])).upload(tmp_path / "a.m4a")
-
-
 def test_subtitle_latin_spacing_and_no_overlap():
     ws = [{"text": x, "start": i * 0.3, "end": i * 0.3 + 0.25, "punc": p}
           for i, (x, p) in enumerate([("Well", ","), ("so", ""), ("plan", ","), ("and", ""), ("ship", ".")])]
@@ -136,7 +108,7 @@ def test_init_refuses_inside_the_repository(capsys):
     assert not (repo / "projects").exists()
 
 
-def test_second_review_lows(tmp_path, monkeypatch):
+def test_second_review_lows():
     from vlog_skill.verify import _find_phrase
 
     assert _find_phrase("C++", "We can call a function here.") == []
@@ -144,11 +116,3 @@ def test_second_review_lows(tmp_path, monkeypatch):
     same = [{"text": "好", "start": 1.0, "end": 1.1, "punc": "。"}, {"text": "的", "start": 1.0, "end": 1.2, "punc": "。"}]
     cues = build_cues(same)
     assert len(cues) == 1 and cues[0]["end"] > cues[0]["start"]
-    rec = Recorder([{"data": {"status": "completed", "video_url": "https://cdn.example/v.mp4"}}, b"x"])
-    ro = tmp_path / "readonly"
-    ro.mkdir()
-    ro.chmod(0o500)
-    with pytest.raises(OSError) as exc:
-        Client("k", opener=rec).download("v1", ro / "file.mp4")
-    ro.chmod(0o700)
-    assert not isinstance(exc.value, __import__("vlog_skill.heygen", fromlist=["UpstreamError"]).UpstreamError)

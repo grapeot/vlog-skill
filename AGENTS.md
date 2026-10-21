@@ -34,12 +34,12 @@ python -m pytest -q
 
 1. **Default branch is `master`**: Target `master` for all diffs, branches, and pull requests.
 2. **No personal or production data**: Never commit recordings, transcripts, avatar videos, rendered outputs, API keys, personal names, or absolute paths from any developer machine. Use placeholder paths such as `/path/to/project` in documentation and synthetic fixtures in `tests/`. Project workspaces created by `vlog init` must live outside the repository by default.
-3. **Secret handling**: Read `HEYGEN_API_KEY` from the environment or a gitignored `.env` file. Never echo, log, or include `HEYGEN_API_KEY` in stdout, stderr, or exception messages.
-4. **One JSON summary per CLI command**: Every `vlog` subcommand, including a usage error, emits exactly one JSON object to `stdout` (only `--help` and `--version` print text). Secrets are scrubbed from that output.
-5. **Raw error pass-through**: Do not wrap upstream failures in generic error messages. Pass through raw upstream details—including HTTP status codes, response bodies, `ffmpeg`/`ffprobe` stderr, exception types, and messages.
+3. **No credentials in this package**: vlog-skill calls no paid or authenticated service. HeyGen is used directly (web UI or its official CLI); do not add a wrapper that needs an API key.
+4. **One JSON summary per CLI command**: Every `vlog` subcommand, including a usage error, emits exactly one JSON object to `stdout` (only `--help` and `--version` print text).
+5. **Raw error pass-through**: Do not wrap upstream failures in generic error messages. Pass through raw details: `ffmpeg`/`ffprobe` stderr, exception types, and messages.
 6. **Speaker-approved pacing defaults**: Keep the production-approved pacing defaults in `edit.py` and `edit_plan.json` (`DEFAULT_PACING` and `DEFAULT_EDGES` in `edit.py`, plus `lead_in_s: 0.40` and `crossfade_ms: 25`); `tests/test_edit.py` pins their behaviour. Keep natural pauses below the thresholds untouched; shorten only longer stalls; refill shortened pauses with measured room tone, never digital silence.
 7. **Clamp edge refinement to cut boundaries**: When `edit.py` pads kept island edges or extends them while RMS energy stays high to avoid clipping consonants, clamp all extensions strictly to the neighboring cut boundaries so deleted syllables are never pulled back into the output.
-8. **Honest scope labeling**: Keep `vlog heygen` documented as "implemented against the documented v3 API; not yet exercised with a real key" until a live run succeeds, and keep Stage 14 (compose and render) marked as "planned".
+8. **Honest scope labeling**: Keep Stage 14 (compose and render) marked as "planned", and mark anything not exercised in a real production as untested.
 
 ## Codebase Layout
 
@@ -53,7 +53,7 @@ vlog-skill/
 │       └── SKILL.md          # Agent skill definition, stage acceptance criteria, schemas, pitfalls
 ├── docs/
 │   ├── prd.md                # Product requirements and milestones
-│   ├── rfc.md                # Architecture, schemas, algorithms, and HeyGen v3 integration design
+│   ├── rfc.md                # Architecture, schemas, algorithms, CLI contract
 │   └── test.md               # Offline test matrix, hardware/key-gated tests, manual QA checklist
 ├── src/
 │   └── vlog_skill/
@@ -65,7 +65,6 @@ vlog-skill/
 │       ├── edit.py           # Island grouping, clamped edge refinement, room-tone pacing, crossfades
 │       ├── verify.py         # Join diff audit between raw and edited transcripts + absent-phrase scan
 │       ├── subtitles.py      # Punctuation-aware SRT chunker (~22 CJK char limit) + glossary replacer
-│       ├── heygen.py         # Standard-library HTTP client for HeyGen API v3
 │       ├── project.py        # Workspace directory initializer (vlog init)
 │       └── cli.py            # argparse CLI entrypoint emitting one JSON summary per command
 └── tests/                    # Offline pytest suite using synthetic audio and mocked HTTP
@@ -80,6 +79,5 @@ vlog-skill/
 - `edit.py`: Converts `cuts` in `edit_plan.json` into kept audio islands, refines island edges against the waveform while clamping to cut boundaries, applies speaker-approved pause rules using sampled `room_tone` and equal-power crossfades, renders `edited.wav` and `edited.m4a`, and writes `manifest.json`.
 - `verify.py`: Maps every cut in `edit_plan.json` through `manifest.json` to `edited.json`, compares raw vs. edited text around each join, checks for `--expect-absent` phrases and doubled characters, and writes `verify_report.json` and `verify_report.md`.
 - `subtitles.py`: Applies `glossary.json` replacements to word/segment transcripts and emits `.srt` cues split at punctuation boundaries, capped at ~22 CJK characters per cue without crossing sentence ends.
-- `heygen.py`: Zero-dependency (`urllib.request`) client for HeyGen API v3 (`https://api.heygen.com`, `X-Api-Key` header): `me`, `looks`, `upload` (multipart `POST /v3/assets` up to 32 MB or 3-step direct upload), `create` (`POST /v3/videos`), `status`, `wait`, and `download`.
 - `project.py`: Implements `vlog init <project_dir>`, creating `research/`, `writing/`, `audio/raw/`, `audio/music/`, `asr/`, `edit/`, `avatar/`, `storyboard/`, `subtitles/`, `broll/`, `render/`, and `qa/`.
-- `cli.py`: Dispatches `vlog` subcommands, enforces single-JSON-object output on `stdout`, and passes raw upstream exceptions and HTTP/subprocess error details through unmodified.
+- `cli.py`: Dispatches `vlog` subcommands, enforces single-JSON-object output on `stdout`, and passes exception and subprocess error details through unmodified.

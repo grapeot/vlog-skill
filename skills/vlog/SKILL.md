@@ -14,8 +14,7 @@ Produce a rendered explainer video in which the speaker's own digital-twin avata
 | Pipeline Area | Status | Notes |
 | :--- | :--- | :--- |
 | Stages 1–9 (research, script, recording, transcription, edit, verify, listening) | Exercised in one production | A ~17-minute Chinese technical explainer; `vlog edit` reproduces that production's edit sample for sample |
-| Stage 10, HeyGen web UI | In use in that production | The avatar video was being generated from the edited audio when v0.1 was written |
-| Stage 10, `vlog heygen` API client | Implemented, not yet exercised with a real key | Built against the HeyGen API v3 documentation (2026-10-20) |
+| Stage 10, HeyGen (web UI or official CLI with OAuth) | Exercised in that production | Full-length render in the web UI; a 60-second test through the official CLI with OAuth (see "Avatar video with HeyGen") |
 | Stages 11–13 (avatar re-transcription, storyboard, B-roll) | Designed, not yet exercised | The storyboard approach (composition modes keyed to spoken phrases) comes from the first production's plan |
 | `vlog subtitles` | Implemented, tested on synthetic data | Punctuation-aware SRT with a glossary |
 | Stage 14 (compose and render) | Planned | Not implemented in v0.1 |
@@ -24,7 +23,7 @@ Produce a rendered explainer video in which the speaker's own digital-twin avata
 ### Boundaries and Responsibilities
 
 - **Agent responsibilities**: Research and build the source contract; propose outline and draft script; run ASR transcription; analyze pauses and quiet windows; author `edit/edit_plan.json`; render and verify edited audio; generate or coordinate avatar video; re-transcribe avatar audio as the master clock; write the storyboard and subtitle glossary; generate B-roll assets; run final QA checks.
-- **Human responsibilities**: Decide thesis and outline; approve script; record raw voice-over; listen to edited audio; generate or approve avatar video (and approve API spend if using `vlog heygen`); review final render.
+- **Human responsibilities**: Decide thesis and outline; approve script; record raw voice-over; listen to edited audio; generate or approve avatar video (and approve any credit spend); review final render.
 - **Hard constraints**:
   1. **The agent cannot hear audio.** It measures loudness, energy envelopes, and transcripts. At every audio checkpoint, the agent must state plainly that a human must listen to judge delivery, pacing, and tone.
   2. **The agent never publishes anything.** Uploading or publishing to external video platforms is strictly out of scope.
@@ -40,7 +39,7 @@ Execution must pause for explicit human input or approval at five checkpoints:
 1. **Checkpoint 1 — Thesis and Outline (Stage 2)**: Human approves target audience, single thesis, and section budget in `writing/brief.md`.
 2. **Checkpoint 2 — Script Approval and Voice Recording (Stages 3–4)**: Human approves `writing/script.md` and records `audio/raw/<take>.m4a`.
 3. **Checkpoint 3 — Edited Audio Listening (Stage 9)**: Agent reports measured duration, integrated LUFS, true peak, and `vlog verify` results, states that it cannot judge delivery by ear, and waits for the human to listen to `audio/edited.m4a`.
-4. **Checkpoint 4 — Avatar Video Generation (Stage 10)**: Human either runs the render in the HeyGen web UI or approves pay-as-you-go API wallet expenditure for `vlog heygen`.
+4. **Checkpoint 4 — Avatar Video Generation (Stage 10)**: Human either runs the render in the HeyGen web UI, or signs in the official HeyGen CLI with OAuth and approves the credit spend before the agent starts a render.
 5. **Checkpoint 5 — Final Render Review (Stage 15)**: Human reviews the final video alongside the QA report.
 
 ---
@@ -130,17 +129,18 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
   4. Human approves the edited audio before Stage 10 proceeds.
 
 ### Stage 10: Avatar Video Generation (Checkpoint 4)
-- **Goal**: Generate a talking-head video of the speaker's digital twin driven by `audio/edited.wav` or `audio/edited.m4a`.
+- **Goal**: Generate a talking-head video of the speaker's digital twin driven by `audio/edited.wav` (see "Avatar video with HeyGen" below; vlog-skill does not wrap HeyGen).
 - **Artifact**: `avatar/avatar.mp4`
 - **Acceptance Criteria**:
   1. `avatar/avatar.mp4` exists and `ffprobe` confirms valid video and audio streams whose duration matches `audio/edited.wav` within 0.2 s.
+  2. The offset between the avatar video's audio track and `audio/edited.wav`, measured by cross-correlation, is recorded (it was 0 ms in the one test so far).
 
-### Stage 11: Re-transcribe Avatar Video (Master Clock)
-- **Goal**: Transcribe the audio track of `avatar/avatar.mp4` to serve as the timing clock for the storyboard, B-roll, and subtitles.
+### Stage 11: Picture Clock
+- **Goal**: A word-level transcript on the avatar video's timeline, used to time the storyboard, B-roll, and subtitles.
 - **Artifact**: `asr/avatar.json`
 - **Acceptance Criteria**:
-  1. `vlog transcribe avatar/avatar.mp4 --out asr/avatar.json` exits with code 0.
-  2. `asr/avatar.json` spans the full duration of `avatar/avatar.mp4`.
+  1. If the Stage 10 offset is zero and the durations match, the output-time `words` of `edit/manifest.json` are already on the picture timeline; otherwise run `vlog transcribe avatar/avatar.mp4 --out asr/avatar.json`.
+  2. Whichever is used spans the full duration of `avatar/avatar.mp4`.
 
 ### Stage 12: Storyboard and Subtitles
 - **Goal**: Design the visual composition timeline keyed to phrases in `asr/avatar.json` and generate corrected SRT subtitles.
@@ -233,13 +233,6 @@ Every `vlog` command prints a single JSON summary object to `stdout` and passes 
 | Render edited audio & manifest | `vlog edit <edit_plan.json>` | Implemented (v0.1) |
 | Audit joins & absent phrases | `vlog verify --manifest <manifest.json> --raw <raw.json> --edited <edited.json> --out <report.json> [--markdown <report.md>] [--expect-absent <phrase> ...] [--allow-double <XX> ...]` | Implemented (v0.1) |
 | Generate SRT with glossary | `vlog subtitles <transcript.json> --glossary <glossary.json> --out <srt>` | Implemented (v0.1) |
-| Check HeyGen API key/balance | `vlog heygen me` | Implemented, untested with real key |
-| List private digital-twin looks | `vlog heygen looks` | Implemented, untested with real key |
-| Upload audio asset to HeyGen | `vlog heygen upload <audio>` | Implemented, untested with real key |
-| Create avatar render job | `vlog heygen create --avatar-id <id> --audio-asset-id <id> [--engine <type>] [--resolution <res>] [--aspect-ratio <ratio>] [--format mp4\|webm] [--title <title>] [--idempotency-key <key>]` | Implemented, untested with real key |
-| Poll render status once | `vlog heygen status <video_id>` | Implemented, untested with real key |
-| Wait for render completion | `vlog heygen wait <video_id> [--timeout <s>] [--interval <s>]` | Implemented, untested with real key |
-| Download completed avatar video | `vlog heygen download <video_id> --out <path>` | Implemented, untested with real key |
 
 ---
 
@@ -274,45 +267,44 @@ Minimal edit plan:
 
 ---
 
-## HeyGen Avatar Generation Path
+## Avatar video with HeyGen
 
-### Choosing a path: subscription credits or the API wallet
+vlog-skill does not wrap HeyGen. Use HeyGen directly, in one of two ways that bill subscription credits:
 
-HeyGen bills the web subscription and the API separately. Per HeyGen's pricing pages as of 2026-10-20, the same digital-twin render costs about three times as much per minute through an API key as through subscription credits:
+- **Web UI**: upload `audio/edited.m4a` or `audio/edited.wav`, pick the speaker's digital-twin look and engine, render, download to `avatar/avatar.mp4`. The first production's full-length render was done this way.
+- **Official HeyGen CLI with OAuth** (`heygen`, installed from HeyGen's documented installer, which verifies a checksum). Sign in with `heygen auth login --oauth`; the CLI documents this path as using subscription credits, while `heygen auth login --api-key` uses the separate API wallet. `heygen auth status` shows the active credential and the remaining credits.
 
-| Engine (digital twin) | Web plan | API key |
+Avoid an API key for long renders. HeyGen bills the API from a separate pay-as-you-go wallet at about three times the per-minute price of subscription credits (pricing pages, 2026-10-20):
+
+| Engine (digital twin) | Subscription credits | API wallet |
 | :--- | :--- | :--- |
-| Avatar V | 48 credits/min (Pro: 1,000 credits for $49/month) | $7.20/min |
+| Avatar V | 48 credits/min | $7.20/min |
 | Avatar IV (video look) | 31 credits/min | $4.83/min |
 | Avatar III (video look) | 4 credits/min | $0.60/min |
 
-So when the speaker has a subscription, default to subscription credits (Option A, or the OAuth route below) and use an API key (Option B) only when there is no subscription or the job needs batch automation. Re-check the prices before a long render, and check the remaining monthly credits: one 18-minute Avatar V render uses most of a 1,000-credit month. HeyGen also documents OAuth access (its MCP server, or `heygen auth login --oauth` in the official CLI) as billed to subscription credits, framed as trial-scale; whether a long render works through it is not yet verified.
+Check the remaining monthly credits before a long render; one 18-minute Avatar V render uses most of a 1,000-credit month. In the first production the speaker compared engines and found Avatar III sufficient.
 
-### Option A: HeyGen web UI (in use in the first production)
-1. Upload `audio/edited.m4a` or `audio/edited.wav` in the HeyGen web interface.
-2. Select the speaker's private digital twin look and start the render; this uses subscription credits.
-3. Download the finished MP4 to `avatar/avatar.mp4` and proceed to Stage 11.
+Command sequence exercised once (2026-10-20, official CLI v0.10.0, OAuth):
 
-### Option B: `vlog heygen` CLI (Implemented Against v3 API; Untested with Real Key)
-- **API Version & Auth**: Uses HeyGen API v3 only (`https://api.heygen.com`, header `X-Api-Key` read from `HEYGEN_API_KEY` environment variable or a gitignored `.env`; never printed). HeyGen v1 and v2 shut down on 2026-10-31.
-- **Billing warning**: API usage bills from a separate pay-as-you-go wallet, not the web subscription, at about three times the per-minute cost (see the table above; an 18-minute Avatar V render is about $127 through the API). Get human confirmation before starting a long API render.
-- **Duration Cap**: HeyGen documentation states a 30-minute cap on most pages but a 10-minute cap for audio input on one page. Until verified with a key, split edited audio longer than 10 minutes at a long pause into segments under 10 minutes, render each separately, and concatenate locally with `ffmpeg`.
-- **Workflow**:
-  1. Verify credentials: `vlog heygen me`
-  2. Find the digital twin's look ID: `vlog heygen looks` (queries `GET /v3/avatars/looks?avatar_type=digital_twin&ownership=private`; use the look `id` as `--avatar-id` after checking `status` and `supported_api_engines`).
-  3. Upload audio: `vlog heygen upload audio/edited.wav` (WAV or MP3 only; an M4A is rejected, convert it first; uses `POST /v3/assets` multipart for files <= 32 MB, or 3-step direct upload via `POST /v3/assets/direct-uploads`, `PUT` with the returned `upload_headers` (plus the file's Content-Type if they carry none), and `POST /v3/assets/{asset_id}/complete` for larger files; `asset_id` does not expire).
-  4. Submit job: `vlog heygen create --avatar-id <look_id> --audio-asset-id <asset_id> --engine avatar_iv --resolution 1080p --aspect-ratio 16:9 --format mp4 --idempotency-key <uuid>` (sends `POST /v3/videos` with `type: "avatar"`; true 4K is supported only on Avatar III with a 4K-trained twin; `webm` provides an alpha channel only for a matting-trained twin on single-scene requests; `Idempotency-Key` replays the original response for 24 hours).
-  5. Wait and download: `vlog heygen wait <video_id> --timeout 7200 --interval 30` then `vlog heygen download <video_id> --out avatar/avatar.mp4` (polls `GET /v3/videos/{video_id}`; treats unknown non-terminal statuses such as `"waiting"` as running; fetches a fresh presigned `video_url` before downloading).
-- **Alternative Official Tooling**: HeyGen also provides an official CLI (`heygen video create --wait`, `heygen video download`) and an MCP server.
+```bash
+heygen avatar looks list --ownership private --avatar-type digital_twin   # pick the look id
+heygen asset create --file clip.wav                                       # WAV or MP3, at most 32 MB
+heygen video create --wait --timeout 40m --idempotency-key <key> -d '{
+  "type": "avatar", "avatar_id": "<look id>", "audio_asset_id": "<asset id>",
+  "engine": {"type": "avatar_iii"}, "resolution": "1080p", "aspect_ratio": "16:9", "output_format": "mp4"}'
+heygen video download <video id> --output-path avatar/avatar.mp4
+```
 
----
+Measured in that test: a 60-second clip rendered in about 100 seconds, cost 4 subscription credits, and came back as 1920x1080, 25 fps, H.264 and AAC, exactly 60.0 s long, with an audio track identical to the uploaded audio (cross-correlation offset 0 ms). The speaker judged its image quality visibly worse than a Video Agent render with the same engine (Avatar III) and the same voice-over; which settings differ has not been established, so until it is, prefer the web UI (Video Agent) for the final render and use the direct CLI path for tests.
+
+Not yet exercised: audio over 32 MB through the CLI (`heygen asset direct-uploads create` and `heygen asset complete create`, or upload an MP3 instead), a full-length render through the CLI (HeyGen's documentation gives 30 minutes per request on most pages and 10 minutes for audio input on one), and transparent `webm` output (only for a digital twin trained with matting).
 
 ## Degraded Cases
 
 | Condition | Detection | Fallback Action |
 | :--- | :--- | :--- |
 | **No Apple Silicon / `mlx-qwen3-asr` unavailable** | `vlog transcribe` fails with import or platform error | Run `vlog transcribe` on an Apple Silicon machine and copy `asr/*.json` into the project, or supply an external word-level transcript formatted to the `transcript.json` schema. All other commands (`utterances`, `quiet`, `edit`, `verify`, `subtitles`, `heygen`) run on any OS with Python 3.12 and `ffmpeg`. |
-| **No `HEYGEN_API_KEY` or API budget constraint** | `HEYGEN_API_KEY` unset or human declines API wallet cost | Pause at Stage 10 and instruct the human to upload `audio/edited.m4a` in the HeyGen web UI and save the output to `avatar/avatar.mp4`. Resume at Stage 11. |
+| **Official HeyGen CLI not installed or not signed in** | `heygen auth status` reports no credential | Pause at Stage 10 and ask the human either to sign in with `heygen auth login --oauth` or to render in the HeyGen web UI and save the output to `avatar/avatar.mp4`. Resume at Stage 11. |
 | **Missing speaking-rate sample** | No speaking-rate measurement in `writing/brief.md` | Ask the human to record 20 seconds of natural speech (or measure from a prior raw recording of the same speaker) before budgeting `writing/script.md`. |
 | **Unsourced claim in script or speech** | Claim in `writing/script.md` or kept `asr/raw.json` has no match in `research/source_contract.md` | In Stage 3, either add a verified primary source to `research/source_contract.md` or rewrite/delete the claim. In Stage 6, cut the unsupported spoken claim in `edit/edit_plan.json` or flag it for the human if cutting breaks narrative continuity. |
 | **No quiet gap on one side of a word to cut** | `vlog quiet` returns no quiet window between the target word and adjacent kept words | Expand the cut in `edit/edit_plan.json` to include the adjacent word(s) up to the nearest quiet gap that leaves a grammatical sentence. |
