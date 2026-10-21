@@ -17,7 +17,7 @@ All state is exchanged through files in a project workspace outside the code rep
 │   ├── raw/
 │   │   └── take1.m4a          # Continuous human voice recording
 │   ├── edited.wav             # Rendered 48 kHz PCM edit
-│   └── edited.m4a             # Rendered AAC edit for listening and the HeyGen web UI (the API takes the WAV)
+│   └── edited.m4a             # Rendered AAC edit for listening and the HeyGen web UI
 ├── asr/
 │   ├── raw.json               # vlog.transcript/1 of audio/raw/take1.m4a
 │   ├── edited.json            # vlog.transcript/1 of audio/edited.wav
@@ -62,7 +62,7 @@ All state is exchanged through files in a project workspace outside the code rep
                               (Human listens & approves)
                                        │
                                        ▼
-                           HeyGen Web UI / vlog heygen
+                           HeyGen web UI / official heygen CLI
                                        │
                                        ▼
                               [avatar/avatar.mp4]
@@ -96,7 +96,6 @@ Package root: `vlog_skill/`. Target runtime: Python 3.12 with `numpy` and system
 | `vlog_skill/edit.py` | Implements `vlog edit <edit_plan.json>`. Filters cut words, groups kept words into islands, refines island boundaries using local RMS energy clamped to cut and neighbor boundaries, inserts room-tone pauses according to the pacing table, joins segments with 25 ms equal-power crossfades, writes WAV and M4A outputs, measures loudness, reports cut edges that sit inside speech energy, and emits `vlog.manifest/1`. |
 | `vlog_skill/verify.py` | Implements `vlog verify`. Reads `manifest.json` (which carries the cuts and islands), `raw.json`, and `edited.json`. Extracts text windows around every join that crosses a cut, flags fillers or doubled characters near joins as `"review"`, searches the entire edited transcript for `--expect-absent` phrases, and writes `vlog.verify/1` JSON and Markdown reports. |
 | `vlog_skill/subtitles.py` | Implements `vlog subtitles <transcript.json> [--glossary <glossary.json>] --out <srt>`. Applies glossary replacements to each cue's text, splits cues at punctuation up to ~22 CJK characters per cue without crossing sentence boundaries, and writes UTF-8 `.srt`. |
-| `vlog_skill/heygen.py` | Implements `vlog heygen` subcommands (`me`, `looks`, `upload`, `create`, `status`, `wait`, `download`) against `https://api.heygen.com` v3 using `urllib.request`. Reads `HEYGEN_API_KEY` from the environment or a local `.env` file. |
 | `vlog_skill/cli.py` | `argparse` dispatcher for `vlog`. Catches typed exceptions, formats the standard JSON output envelope on stdout, and exits with deterministic codes (`0`, `2`, `3`, `4`, `5`). |
 
 ---
@@ -287,51 +286,11 @@ Limits that matter in practice: a partial syllable left at a join may not be tra
 
 ---
 
-## 5. HeyGen API v3 Client (`vlog_skill/heygen.py`)
+## 5. HeyGen (external, not wrapped)
 
-**Implementation Status**: Implemented against HeyGen API v3 documentation researched on 2026-10-20; not yet exercised with a live API key. HeyGen v1 and v2 APIs shut down on 2026-10-31; `vlog heygen` targets v3 exclusively.
+v0.1 briefly contained `vlog heygen`, a standard-library client for the HeyGen v3 API. It was removed: an API key bills a separate pay-as-you-go wallet at about three times the per-minute price of subscription credits, while HeyGen's official CLI (`heygen`) can sign in with OAuth and bill subscription credits. The skill therefore points to the web UI and the official CLI (see `skills/vlog/SKILL.md`, "Avatar video with HeyGen"), and this package needs no credentials.
 
-### 5.1 Authentication and Billing Constraints
-
-- Base URL: `https://api.heygen.com`
-- Header: `X-Api-Key: <HEYGEN_API_KEY>` (read from the `HEYGEN_API_KEY` environment variable or a `.env` file given by `--env-file`, default `./.env`; never echoed in logs or error payloads).
-- **Billing warning**: API calls draw from a separate pay-as-you-go API wallet, not a HeyGen web subscription. An 18-minute digital-twin render on the newest engine costs on the order of $100 USD via the API versus significantly less in web-plan credits. Uploading `audio/edited.m4a` via the HeyGen web UI and downloading `avatar/avatar.mp4` remains a first-class supported workflow.
-
-### 5.2 Endpoints and Subcommands
-
-1. `vlog heygen me`:
-   `GET /v3/users/me`: verifies the key and returns `billing_type` and balance.
-2. `vlog heygen looks`:
-   `GET /v3/avatars/looks?avatar_type=digital_twin&ownership=private&limit=50` (`--avatar-type`, `--ownership`, `--limit`)
-   Returns each look's `id` (used as `avatar_id`), `name`, `status`, and `supported_api_engines`.
-3. `vlog heygen upload <audio>`:
-   - If file size `<= 32 * 1024 * 1024` bytes (32 MB): simple multipart upload `POST /v3/assets` with field `file` (`audio/mpeg` for `.mp3`, `audio/wav` for `.wav`; other formats such as `.m4a` are rejected with a conversion hint, because HeyGen accepts only MP3 and WAV audio).
-   - If file size `> 32` MB: 3-step direct upload:
-     1. `POST /v3/assets/direct-uploads` with JSON `{"filename": name, "content_type": mime, "size_bytes": size}` -> returns `{asset_id, upload_url, upload_headers}`.
-     2. `PUT <upload_url>` with the raw file bytes and `upload_headers` as returned; if they carry no `Content-Type`, the file's audio type is added so urllib does not send `application/x-www-form-urlencoded`.
-     3. `POST /v3/assets/{asset_id}/complete` with body `{}`.
-   - Returns `asset_id` (asset IDs do not expire).
-4. `vlog heygen create --avatar-id <id> --audio-asset-id <id> [--engine <type>] [--resolution <res>] [--aspect-ratio <ratio>] [--format mp4|webm] [--title <str>] [--callback-url <url>] [--idempotency-key <key>]` (or `--audio-url <public url>` instead of `--audio-asset-id`, at most 32 MB):
-   `POST /v3/videos` with body:
-   ```json
-   {
-     "type": "avatar",
-     "avatar_id": "<look_id>",
-     "audio_asset_id": "<asset_id>",
-     "engine": {"type": "avatar_iv"},
-     "resolution": "1080p",
-     "aspect_ratio": "16:9",
-     "output_format": "mp4",
-     "title": "episode-01"
-   }
-   ```
-   Sends `Idempotency-Key` header when provided (HeyGen replays the original response for 24 hours).
-5. `vlog heygen status <video_id>`:
-   `GET /v3/videos/{video_id}`. Returns `status` (`pending`, `processing`, `completed`, `failed`, or other non-terminal values like `waiting`), `video_url`, `duration`, `failure_code`, and `failure_message`.
-6. `vlog heygen wait <video_id> [--timeout 7200] [--interval 30]`:
-   Polls `GET /v3/videos/{video_id}` every `--interval` seconds. Treats `completed` as success, `failed` as exit code `5` (including `failure_code` and `failure_message`), and any other status (`pending`, `processing`, `waiting`, etc.) as still running until `--timeout` expires.
-7. `vlog heygen download <video_id> --out <path>`:
-   Calls `GET /v3/videos/{video_id}` immediately before downloading to obtain a fresh presigned `video_url`, then streams the file to `<path>`.
+Observed in the first production: a 60 s render through `heygen video create` (`type: avatar`, Avatar III, 1080p) with OAuth cost 4 subscription credits and returned audio identical to the upload (0 ms offset). The speaker judged that direct render visibly worse than renders made through HeyGen's Video Agent with the same engine; the cause has not been established yet, so treat the direct path as untested for quality.
 
 ---
 
@@ -363,17 +322,13 @@ Real output of `vlog edit` on the synthetic demo:
 
 ### Error envelope (non-zero exit code)
 
-Upstream details are passed through, not summarized. For HeyGen, `details` carries the HTTP status, the raw response body, and the URL:
+Error details are passed through, not summarized:
 
 ```json
 {
-  "command": "heygen status",
+  "command": "quiet",
   "ok": false,
-  "error": {
-    "type": "UpstreamError",
-    "message": "HeyGen request failed (403) for https://api.heygen.com/v3/videos/v1: {\"error\":{\"code\":\"api_key_required\"}}",
-    "details": {"status": 403, "body": "{\"error\":{\"code\":\"api_key_required\"}}", "url": "https://api.heygen.com/v3/videos/v1"}
-  }
+  "error": {"type": "ToolError", "message": "ffmpeg could not decode not_audio.wav: ... Invalid data found when processing input", "details": null}
 }
 ```
 
@@ -385,9 +340,9 @@ For ffmpeg failures (`ToolError`) the message carries ffmpeg's stderr. For other
 | :--- | :--- | :--- |
 | 0 | Success | Command completed. `vlog verify` also exits 0 when it finds problems; read `clean` and `joins_flagged`. |
 | 2 | Usage error | Unknown subcommand, missing required flag |
-| 3 | Missing dependency or credential | ffmpeg or ffprobe not on PATH; `mlx-qwen3-asr` not installed; `HEYGEN_API_KEY` not set |
+| 3 | Missing dependency | ffmpeg or ffprobe not on PATH; `mlx-qwen3-asr` not installed |
 | 4 | Bad input | Missing file, malformed JSON, invalid plan (a cut with start >= end, unknown kind, a room-tone window outside the recording or shorter than 0.2 s), nothing left to render, `vlog init` inside the repository |
-| 5 | Upstream failure | HeyGen HTTP 4xx/5xx or network error (including uploads and downloads), a render that ended in `failed` or did not finish before `--timeout` (`vlog heygen wait`), ffmpeg returned an error (including media it cannot decode) |
+| 5 | External tool failure | ffmpeg returned an error, including media it cannot decode |
 
 Overlapping cuts are allowed; a word is dropped if its midpoint falls in any of them.
 
@@ -398,15 +353,14 @@ Overlapping cuts are allowed; a word is dropped if its midpoint falls in any of 
 Testing is split into three tiers (detailed in `docs/test.md`):
 
 1. **Offline tests (`pytest`)**: run on any machine with Python 3.12, numpy, ffmpeg and ffprobe. Audio is synthesized (tone bursts as syllables over a -62 dBFS noise floor), so a test can check which syllables survived an edit by the dominant frequency at each output time. HeyGen calls go through an injectable opener (`Client(opener=...)`) that serves canned responses. They cover the edit (cuts, kept pauses, shortened stalls, clamped edges, manifest time map, overrides), quiet runs, punctuation, utterances, verification flags, subtitles, the HeyGen request shapes and upload paths, and CLI envelopes and exit codes.
-2. **Hardware- or credential-gated checks** (`vlog transcribe` on Apple Silicon, `vlog heygen` with a funded key) are manual for now; `docs/test.md` lists them.
+2. **Hardware- or credential-gated checks** (`vlog transcribe` on Apple Silicon) are manual for now; `docs/test.md` lists them.
 3. **Production manual acceptance checklist**: Executed by the agent and human on real episodes.
 
 ---
 
 ## 8. Open Questions
 
-1. **HeyGen single-request audio duration cap**:
-   HeyGen v3 documentation states a 30-minute maximum video duration on general pages, but one audio-input page specifies a 10-minute cap for uploaded audio assets. Until verified against a live account, audio longer than 10 minutes should be split at a long section pause into `<= 10` minute segments, rendered separately, and joined locally.
+1. **HeyGen render quality and duration through the official CLI**: the speaker judged a direct `heygen video create` render worse than a Video Agent render with the same engine; find out which settings differ. HeyGen's documentation also disagrees on the per-request audio cap (30 minutes on most pages, 10 minutes for audio input on one).
 2. **HeyGen transparent background (`webm` alpha channel)**:
    `output_format: "webm"` provides an alpha channel only when the digital twin was trained with matting and only for single-scene requests. Whether a specific user's private digital twin supports matting is not exposed in `GET /v3/avatars/looks` metadata and must be tested per avatar look.
 3. **v0.2 Timeline Schema (`vlog.timeline/1`)**:

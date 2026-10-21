@@ -20,7 +20,7 @@ Engineers and technical authors who use coding agents to produce narrated explai
 | Audio editing & loudness measurement (`vlog edit`) | Exercised in one production | Raised-cosine crossfades, speaker-approved room-tone pacing, `ffmpeg ebur128` metrics, time-mapping manifest |
 | Re-transcription join verification (`vlog verify`) | Exercised in one production | Compares raw vs. edited transcripts around every join and checks for absent phrases |
 | Subtitle generation (`vlog subtitles`) | Implemented (v0.1) | Punctuation-chunked SRT (~22 CJK chars max per cue, never across sentence ends) with glossary replacements |
-| HeyGen API v3 client (`vlog heygen`) | Implemented, untested | Built against HeyGen v3 API docs (2026-10-20); not yet exercised with a live API key (production run used the HeyGen web UI) |
+| Avatar video | HeyGen, used directly | Web UI or the official `heygen` CLI with OAuth (subscription credits); vlog-skill does not wrap HeyGen. See the skill's "Avatar video with HeyGen" section |
 | B-roll frame rendering & music generation | Delegated | Provided by sibling repository [`opus-video-audio-skill`](https://github.com/grapeot/opus-video-audio-skill) |
 | Timeline compose & final ffmpeg render | Planned (v0.2) | Automated multi-mode avatar/B-roll compositing and -16 LUFS audio ducking |
 
@@ -104,7 +104,7 @@ vlog verify \
 
 7. **Human listening checkpoint**: Listen to `/path/to/project/audio/edited.m4a` and approve delivery and pacing.
 
-8. **Generate the avatar video**: Upload `audio/edited.m4a` in the HeyGen web UI (subscription credits; about a third of the API price per minute as of 2026-10) or use `vlog heygen upload audio/edited.wav` with an API key (the API takes WAV or MP3), and save the output to `/path/to/project/avatar/avatar.mp4`.
+8. **Generate the avatar video** with HeyGen, in the web UI or with the official `heygen` CLI signed in through `heygen auth login --oauth` (both bill subscription credits, about a third of the API-wallet price per minute as of 2026-10), and save it to `/path/to/project/avatar/avatar.mp4`.
 
 9. **Re-transcribe avatar video and generate subtitles**:
 
@@ -117,7 +117,7 @@ vlog subtitles /path/to/project/asr/avatar.json \
 
 ## CLI Summary
 
-Every command prints a single JSON summary object to `stdout` and passes upstream errors through with raw details (HTTP status, response body, exception type).
+Every command prints a single JSON summary object to `stdout` and passes error details through (ffmpeg stderr, exception type and message).
 
 | Command | Description | Status |
 | :--- | :--- | :--- |
@@ -128,13 +128,6 @@ Every command prints a single JSON summary object to `stdout` and passes upstrea
 | `vlog edit <edit_plan.json>` | Render edited WAV and M4A with equal-power crossfades and room-tone pads; write manifest and `ebur128` loudness | Reproduces the first production's edit sample for sample |
 | `vlog verify --manifest <m> --raw <r> --edited <e> --out <json> [--markdown <md>] [--expect-absent <str> ...]` | Compare raw vs. edited text around joins and scan for cut phrases; write JSON and Markdown reports | Run on the first production: flagged the three defects of the first edit, clean on the fixed edit |
 | `vlog subtitles <transcript.json> --glossary <glossary.json> --out <srt>` | Generate SRT chunked at punctuation (max ~22 CJK chars/cue) with glossary term replacements | Implemented (v0.1) |
-| `vlog heygen me` | Check `HEYGEN_API_KEY` validity and account balance (`v3` API) | Implemented, untested |
-| `vlog heygen looks` | List private digital-twin looks and supported engines (`v3` API) | Implemented, untested |
-| `vlog heygen upload <audio>` | Upload audio via simple (`<= 32 MB`) or 3-step direct upload (`v3` API) | Implemented, untested |
-| `vlog heygen create --avatar-id <id> --audio-asset-id <id> [...]` | Create an avatar render job from uploaded audio (`v3` API) | Implemented, untested |
-| `vlog heygen status <video_id>` | Poll video render status once (`v3` API) | Implemented, untested |
-| `vlog heygen wait <video_id> [--timeout] [--interval]` | Poll until render reaches `completed` or `failed` (`v3` API) | Implemented, untested |
-| `vlog heygen download <video_id> --out <path>` | Fetch fresh presigned URL and download rendered video (`v3` API) | Implemented, untested |
 
 ## Project Layout
 
@@ -178,7 +171,6 @@ vlog-skill/
 │       ├── edit.py
 │       ├── verify.py
 │       ├── subtitles.py
-│       ├── heygen.py
 │       ├── project.py
 │       └── cli.py
 └── tests/
@@ -189,14 +181,13 @@ vlog-skill/
 1. **Thesis and outline**: Human defines or approves the thesis, audience, and section budget in `writing/brief.md`.
 2. **Script and voice recording**: Human approves `writing/script.md` and records the voice-over in one continuous file.
 3. **Edited audio listening**: The agent cannot hear audio. It measures loudness, peak, duration, and re-transcription joins, then pauses so the human can listen to `audio/edited.m4a` and judge delivery.
-4. **Avatar video generation**: Human renders the avatar video in the HeyGen web UI or approves pay-as-you-go API wallet usage via `vlog heygen`.
+4. **Avatar video generation**: Human renders the avatar video in the HeyGen web UI, or signs in the official HeyGen CLI with OAuth and approves the credit spend.
 5. **Final QA review**: Human inspects the rendered video, contact sheets, and final transcript. The agent never publishes outputs.
 
 ## Privacy Rules
 
 - Never commit voice recordings, transcripts, avatar videos, rendered videos, API keys, personal names, or machine-specific paths to the repository.
 - All test fixtures use synthetic audio (generated sine tones and noise) and synthetic transcripts.
-- `HEYGEN_API_KEY` is loaded from the environment or a gitignored `.env` file and is never printed in logs or command output.
 - Project directories created by `vlog init` live outside the repository by default.
 
 ## License

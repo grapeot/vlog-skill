@@ -11,7 +11,7 @@ import numpy as np
 
 
 class DependencyError(RuntimeError):
-    """A required external program, optional Python package, or credential is missing."""
+    """A required external program or optional Python package is missing."""
 
 
 class ToolError(RuntimeError):

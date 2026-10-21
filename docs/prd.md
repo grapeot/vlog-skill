@@ -32,8 +32,7 @@ Repository: `https://github.com/grapeot/vlog-skill` (MIT license, default branch
 | Waveform-clamped audio editing (`vlog edit`) | Implemented (v0.1) | Exercised in production; speaker-approved pacing defaults |
 | Closed-loop join verification (`vlog verify`) | Implemented (v0.1) | Exercised in production; caught 3 join defects in first pass |
 | Subtitle generation with glossary (`vlog subtitles`) | Implemented (v0.1) | Punctuation-chunked SRT with term replacement |
-| HeyGen API v3 client (`vlog heygen`) | Implemented, untested (v0.1) | Built against v3 docs (2026-10-20); not yet run with a live API key |
-| HeyGen web UI workflow | In use in the first production | Upload `audio/edited.m4a`, download `avatar/avatar.mp4` |
+| HeyGen, used directly (web UI or official CLI with OAuth) | Exercised in the first production | Full-length render in the web UI; a 60 s test through the official CLI with OAuth; subscription credits |
 | B-roll rendering & music generation | External sibling project | Provided by `https://github.com/grapeot/opus-video-audio-skill` |
 | Timeline composition & render (`vlog compose`) | Planned (v0.2) | `ffmpeg` layout modes, subtitle burn-in/mux, ducked music mix |
 
@@ -49,7 +48,7 @@ The pipeline was built and validated on one production: an approximately 17.7-mi
 | 4. Recording | None. | Record continuous raw voice audio (`audio/raw/`), speaking retakes or self-directions aloud as needed. |
 | 5–8. Audio Edit & Verify | Transcribe raw audio, fact-check spoken transcript against source contract, snap cuts to quiet gaps, render edit, re-transcribe, and iterate `vlog verify` until clean. | None during iteration. |
 | 9. Listening Checkpoint | Report duration, LUFS loudness, true peak, and verification summary; state plainly that the agent cannot hear delivery. | Listen to `audio/edited.m4a` and approve pacing and cuts, or request adjustments. |
-| 10–11. Avatar Video | Run `vlog heygen` (or instruct web UI upload) and re-transcribe `avatar/avatar.mp4` as the master picture clock. | Generate or approve the avatar video and incur any HeyGen billing. |
+| 10–11. Avatar Video | With the human's approval, render through the official HeyGen CLI (OAuth), or ask the human to use the web UI; check the audio offset and establish the picture clock. | Sign in or render, and approve the credit spend. |
 | 12–13. Storyboard & B-Roll | Key `storyboard/storyboard.md` to the avatar transcript phrases; generate B-roll assets. | Review visual style and B-roll beats. |
 | 14–15. Render & QA | Assemble timeline, verify stream durations, generate contact sheets, and re-transcribe final audio. | Watch the final render and publish manually outside the tool. |
 
@@ -58,8 +57,8 @@ The pipeline was built and validated on one production: an approximately 17.7-mi
 1. **Source traceability**: Every number and attributed claim in both the script and the final kept speech must trace to `research/source_contract.md`.
 2. **Artifact-free audio cuts**: Every cut boundary is placed inside a measured quiet interval on the waveform, refined without crossing adjacent cut boundaries, and joined with 25 ms equal-power crossfades and room-tone fills.
 3. **Closed-loop verification**: Edited audio is always re-transcribed and checked with `vlog verify` to detect residual fillers, doubled syllables, or uncut phrases before human review.
-4. **Deterministic CLI contract**: Every `vlog` command outputs a single JSON result envelope to stdout and passes upstream errors (HTTP status, response body, `ffmpeg` stderr, exception type) through without wrapping.
-5. **Graceful degradation**: The toolset operates when optional pieces are absent (e.g., running editing and verification when `mlx-qwen3-asr` is unavailable by accepting pre-computed transcripts, or using the HeyGen web UI when `HEYGEN_API_KEY` is unset).
+4. **Deterministic CLI contract**: Every `vlog` command outputs a single JSON result envelope to stdout and passes error details (`ffmpeg` stderr, exception type) through without wrapping.
+5. **Graceful degradation**: The toolset operates when optional pieces are absent (e.g., running editing and verification when `mlx-qwen3-asr` is unavailable by accepting pre-computed transcripts).
 
 ## 6. Non-Goals
 
@@ -82,7 +81,7 @@ Each criterion is verifiable by an agent inspecting the project directory and co
 
 ## 8. Milestones
 
-### v0.1: Audio Pipeline, Verification, Subtitles, and HeyGen Client (Current)
+### v0.1: Audio Pipeline, Verification, and Subtitles (Current)
 
 - `vlog init`: Create project directory tree outside the repo.
 - `vlog transcribe`: Word-level ASR and forced alignment via `mlx-qwen3-asr` (`Qwen3-ASR-1.7B` + `Qwen3-ForcedAligner-0.6B`) on Apple Silicon, with automatic `ffmpeg` audio extraction for video inputs.
@@ -91,7 +90,7 @@ Each criterion is verifiable by an agent inspecting the project directory and co
 - `vlog edit`: Waveform editor implementing word midpoint filtering, island grouping, cut-clamped edge refinement, speaker-approved room-tone pause pacing, 25 ms equal-power crossfades, WAV/M4A export, `ebur128` loudness measurement, and manifest generation.
 - `vlog verify`: Join comparator and `expect-absent` scanner generating JSON and Markdown reports.
 - `vlog subtitles`: Punctuation-chunked SRT generator (~22 CJK characters max per cue, never crossing sentence ends) with glossary replacement for ASR mis-recognitions.
-- `vlog heygen`: Standard-library client for HeyGen API v3 (`me`, `looks`, `upload`, `create`, `status`, `wait`, `download`).
+- HeyGen guidance in the skill: use the web UI or the official HeyGen CLI with OAuth (subscription credits); a `vlog heygen` API-key client was written and then removed because the API wallet costs about three times as much per minute.
 - Agent skill specification (`skills/vlog/SKILL.md`) and offline test suite.
 
 ### v0.2: Timeline Composition and Rendering (Planned)
@@ -107,5 +106,5 @@ Each criterion is verifiable by an agent inspecting the project directory and co
 
 ### Later
 
-- Automated splitting of edited audio >10 minutes at long pauses for HeyGen API rendering, followed by sample-accurate local video/audio concatenation.
+- If HeyGen rejects long audio through the CLI, split the edited audio at long pauses and join the renders locally, sample-accurately.
 - `vlog qa` subcommand to generate frame contact sheets and verify stream durations and sync automatically.
