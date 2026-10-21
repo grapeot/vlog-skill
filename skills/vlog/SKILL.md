@@ -353,7 +353,7 @@ The following design was adopted for the second pass (stated here as the design 
   - A concept keeps the same words, colour, and screen position everywhere in the video.
   - New elements arrive in full ink; older elements dim instead of disappearing so context stays visible.
   - Keep about five or fewer live items on the stage at one time.
-  - Keep one meaning per colour across the film. In a table whose rows are already identified by number and position, do not spend colour on row identity.
+  - Keep one meaning per colour across the film, from the owner's brand palette when there is one (see "Colour semantics"). In a table whose rows are already identified by number and position, do not spend colour on row identity.
 - **On-screen words**: Use the speaker's own key terms as short labels, not full sentences, and do not repeat the subtitle text on the canvas.
 - **Speaker layout**: When there is no self-introduction, open with a title card, then show the speaker full-frame for the first couple of sentences, then move the speaker to a small fixed box in a corner for the rest of the film because the face is not the main subject. In the second pass, the left rail holds the question, the map, and the speaker's box; the stage occupies the right two thirds of the frame; subtitles sit centred under the stage.
 - **Optional illustration plates**: Illustration plates from an image model are optional. Use a plate only where an image carries a relationship better than a diagram.
@@ -406,12 +406,16 @@ Do not guess plate coordinates or assume image dimensions. Read the plate's actu
 
 ### Colour semantics
 
-Assign each colour one meaning across the entire film and do not reuse it for unrelated concepts. In the first production:
+Assign each colour one meaning across the entire film and do not reuse it for unrelated concepts. When the owner has a brand kit, take the palette and the colour meanings from it rather than inventing a scheme.
 
-- **Blue**: machine, and double check.
-- **Amber**: human, cross check, and signature.
-- **Grey**: system.
-- **Red**: reserved for the single problem in a frame.
+The first production went through two schemes. The first draft gave colours to actors: blue for machine and double check, amber for human, cross check and signature, grey for system, red for the single problem in a frame. The owner then asked for the whole film in the brand's palette, which has one bright colour and one restrained second colour, so the final cut used meanings instead of actors:
+
+- **Brand green**: the point of the frame (the answer, the mechanism, the side to take). Someone else's number is never green.
+- **Oxblood (the brand's second colour)**: the problem or the rejected side; at most one per frame.
+- **Ink in three weights**: everything else, with the lightest ink as the floor for any text (dimmed elements must not fall below it).
+- **Paper**: the brand's page colour, flat, with no texture or vignette; the speaker's box sits on a card with a hairline frame, without a shadow.
+
+Machine versus human is then carried by words and position ("人看 / 机器看" side by side), not by colour.
 
 ### Independent art-director review loop
 
