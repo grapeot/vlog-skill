@@ -18,7 +18,7 @@ Produce a rendered explainer video in which the speaker's own digital-twin avata
 | Stage 11 (picture clock) | Exercised in the first production | `vlog offset` found 160 ms of drift in the Video Agent render; the picture is timed from its transcript |
 | Stages 12–13 (storyboard, look development, B-roll) | Exercised in the first production, second pass | A per-line illustration pass was rejected after a 3 min 52 s checkpoint; the second pass (argument-map canvas) covered the full film and went through one independent cognitive-load review before the owner's review |
 | `vlog subtitles` | Exercised in the first production | Punctuation-aware cues with a glossary; long clauses are cut near word boundaries |
-| Stage 14 (compose and render) | Exercised once with a project-local renderer | The CLI does not compose; the first production rendered 17.8 minutes of 1080p25 in about 100 s with 10 worker processes, then applied a 1.1x speed change |
+| Stage 14 (compose and render) | Exercised once with a project-local renderer | The CLI does not compose; the first production rendered 17.8 minutes of 1080p25 in about 100 s with 10 worker processes, tried a 1.1x speed change that the owner reverted after watching |
 | Stage 15 (final QA) | Designed, not yet exercised | |
 
 ### Boundaries and Responsibilities
@@ -178,7 +178,8 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
   1. `render/final.mp4` exists, `ffmpeg` `ebur128` integrated loudness is `-16.0 +/- 0.5` LUFS, subtitles are both burned in and muxed as a stream, and audio/video stream durations match.
   2. If a speed change was requested, it is applied last to picture and sound together, and the subtitle times are divided by the same factor (see "Pace adjustment and the one-clock rule").
   3. Music and sound effects are placed on the same original clock as the picture, computed from the same timeline objects the renderer uses (chord changes on section starts, effects on map events), and mixed under the voice before the speed change, so the music is stretched with everything else.
-- **Advice**: In the first production the bed was a sparse MIDI score (warm pad, piano, celesta, rendered with fluidsynth) with a few synthesised effects: a soft tick as each map cell is written, a small bell when a row receives its mechanism, a low bloom when the map zooms out. Music sat about 15 dB below the voice while speaking (about 12 dB in gaps) and dropped to near silence under the one line that had to land; the mix measured -16.0 LUFS before and -16.2 LUFS after the 1.1x speed change, true peak -1.4 dBFS. The listening verdict stays with the human.
+- **Advice**: In the first production the bed was a sparse MIDI score (warm pad, piano, celesta, rendered with fluidsynth), about 15 dB below the voice while speaking (about 12 dB in gaps), dropping to near silence under the one line that had to land; the mix measured -16.0 LUFS integrated, true peak -1.4 dBFS. After watching, the owner removed the synthesised effects (a tick per map cell, a bell per mechanism, a bloom per zoom), reverted the 1.1x speed change, and lowered the music to 80% of that level. Treat effects and speed changes as options to offer, not defaults, and leave the listening verdict with the human.
+- **Advice (brand)**: When the owner has a brand kit, put the logo on the title card and the end card and a small mark in a corner of the canvas, using the kit's supplied file for that surface (for example a colour logo on light paper) without recolouring it. The first draft used a legacy black lockup; the owner's current identity is a colour one, so check the kit's current guidance rather than the first file found. End with a short fade to black.
 
 ### Stage 15: Final QA (Checkpoint 5)
 - **Goal**: Verify the final render for visual defects, sync drift, and audio truncation before human sign-off.
@@ -362,7 +363,7 @@ The following design was adopted for the second pass (stated here as the design 
 When the owner asks to speed up speech slightly without changing pitch, picture and sound must be sped up together because the avatar's lips are synced to the audio:
 
 - **Constraint (one-clock rule)**: Render the picture on the original clock (the clock of the avatar transcript) so all visual anchors and subtitle timestamps use a single clock throughout production. Apply the speed change only as the final step.
-- **Final-step transform**: On the final render, apply video filter `setpts=PTS/<factor>` and audio filter `atempo=<factor>` (ffmpeg's `atempo` performs a pitch-preserving time stretch), and divide every subtitle timestamp by `<factor>`. In the second pass, the factor chosen was `1.1`, reducing a 17 min 43 s video to about 16 min 6 s.
+- **Final-step transform**: On the final render, apply video filter `setpts=PTS/<factor>` and audio filter `atempo=<factor>` (ffmpeg's `atempo` performs a pitch-preserving time stretch), and divide every subtitle timestamp by `<factor>`. In the second pass the factor was `1.1` (17 min 43 s became about 16 min 12 s); after watching, the owner reverted to the original speed, so ask before applying one.
 
 ### Reviewer rubric
 
@@ -429,6 +430,8 @@ Do not restyle the speaker's video by default. In the first production, the revi
 
 ### Choosing a rendering route
 
+Default to HTML (a browser timeline such as Remotion, or HTML/SVG rendered frame by frame) for the canvas: the argument map, stage diagrams, labels, arrows and subtitles. Use Python (PIL and numpy) only for steps that need per-pixel computation, such as measuring a plate's ink or deriving a boundary from its texture, and composite their output as images.
+
 In the first production, the same 33-second segment was implemented twice from one shared timeline: once with SVG in a browser timeline (Remotion) and once frame by frame in Python with PIL and numpy.
 
 | Metric / characteristic | Browser timeline (Remotion / SVG) | Python (PIL + numpy) |
@@ -436,9 +439,9 @@ In the first production, the same 33-second segment was implemented twice from o
 | Picture quality | Practically identical | Practically identical |
 | Render time (33 s clip) | 20 s | 25 s |
 | Implementation size | 252 lines | 221 lines |
-| Strengths | Live scrubbing preview; built-in stroke drawing, masks, blend modes, and web fonts | Direct per-pixel computation (ink measurement, distance fields); no second toolchain |
+| Strengths | Live scrubbing preview; text layout and measurement by the browser; built-in stroke drawing, masks, blend modes, and web fonts | Direct per-pixel computation (ink measurement, distance fields); no second toolchain |
 
-The owner slightly preferred the Python output, so the first production used Python. Choose the rendering route by working style and whether the scenes need per-pixel computation, not by expected picture quality.
+The owner slightly preferred the Python output on that plate-based segment, so the film was built in Python. The second, text-heavy canvas pass then showed the cost: every label, arrow and box was placed by hand-written coordinates, and the owner's review still found an arrow whose gap did not match the text before it and a growing box that ran into neighbouring elements, defects that read as bugs rather than design. A browser lays out and measures text itself, which removes this class of defect, so the owner chose HTML for later productions.
 
 ### Acceptance Criteria
 
@@ -494,3 +497,4 @@ An agent can verify look development and rendering against these checks (the pla
 | 22 | The reviewer read a red cross beside "double check" as "double check is wrong", although double check was the answer to an earlier row | A rejection mark was put on the concept rather than on its limitation in this context | In a contrast, mark the limitation in words ("same angle: cannot see beyond the diff"); keep red for the frame's single problem and audit every frame for a second red. |
 | 23 | Audio checks against the avatar track showed correlation 0.7 at 0 ms offset after adding a title card in front | ffmpeg `adelay=3000` delays only the first channel of stereo audio; the downmix mixed delayed and undelayed channels | Use `adelay=<ms>:all=1` when delaying a stereo track (the render used it; the check command had not). |
 | 24 | Mixing an 18-minute film looked hung | Envelope smoothing with `np.convolve` over about 50 million samples with a 0.35 s to 1.5 s kernel is O(N x K) | Use a cumulative-sum moving average and float32 arrays; the whole score, mix and two-pass loudnorm then took about 90 s. |
+| 25 | An arrow sat too far from the label before it; a growing box overlapped other elements | Positions on the canvas were hand-written pixel coordinates in Python, guessed from text sizes | Lay out the canvas in HTML so text is measured and placed by the browser; where coordinates remain, derive them from measured text widths and check the largest state of anything that grows. |
