@@ -56,7 +56,7 @@ The pipeline was built and validated on one production: an approximately 17.7-mi
 ## 5. Goals
 
 1. **Source traceability**: Every number and attributed claim in both the script and the final kept speech must trace to `research/source_contract.md`.
-2. **Artifact-free audio cuts**: Every cut boundary is placed inside a measured quiet interval on the waveform, refined without crossing adjacent cut boundaries, and joined with 25 ms raised-cosine crossfades and room-tone fills.
+2. **Artifact-free audio cuts**: Every cut boundary is placed inside a measured quiet interval on the waveform, refined without crossing adjacent cut boundaries, and joined with 25 ms equal-power crossfades and room-tone fills.
 3. **Closed-loop verification**: Edited audio is always re-transcribed and checked with `vlog verify` to detect residual fillers, doubled syllables, or uncut phrases before human review.
 4. **Deterministic CLI contract**: Every `vlog` command outputs a single JSON result envelope to stdout and passes upstream errors (HTTP status, response body, `ffmpeg` stderr, exception type) through without wrapping.
 5. **Graceful degradation**: The toolset operates when optional pieces are absent (e.g., running editing and verification when `mlx-qwen3-asr` is unavailable by accepting pre-computed transcripts, or using the HeyGen web UI when `HEYGEN_API_KEY` is unset).
@@ -88,7 +88,7 @@ Each criterion is verifiable by an agent inspecting the project directory and co
 - `vlog transcribe`: Word-level ASR and forced alignment via `mlx-qwen3-asr` (`Qwen3-ASR-1.7B` + `Qwen3-ForcedAligner-0.6B`) on Apple Silicon, with automatic `ffmpeg` audio extraction for video inputs.
 - `vlog utterances`: Pause-segmented utterance table for reading transcripts and planning cuts.
 - `vlog quiet`: 10 ms RMS envelope scanner to locate quiet intervals for cut edges.
-- `vlog edit`: Waveform editor implementing word midpoint filtering, island grouping, cut-clamped edge refinement, speaker-approved room-tone pause pacing, 25 ms raised-cosine crossfades, WAV/M4A export, `ebur128` loudness measurement, and manifest generation.
+- `vlog edit`: Waveform editor implementing word midpoint filtering, island grouping, cut-clamped edge refinement, speaker-approved room-tone pause pacing, 25 ms equal-power crossfades, WAV/M4A export, `ebur128` loudness measurement, and manifest generation.
 - `vlog verify`: Join comparator and `expect-absent` scanner generating JSON and Markdown reports.
 - `vlog subtitles`: Punctuation-chunked SRT generator (~22 CJK characters max per cue, never crossing sentence ends) with glossary replacement for ASR mis-recognitions.
 - `vlog heygen`: Standard-library client for HeyGen API v3 (`me`, `looks`, `upload`, `create`, `status`, `wait`, `download`).
