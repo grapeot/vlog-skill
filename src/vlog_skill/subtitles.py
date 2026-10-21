@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+import numpy as np
+
 from .transcribe import CLAUSE_END, SENTENCE_END
 
 CJK = re.compile(r"[一-鿿]")
@@ -27,41 +29,76 @@ def apply_glossary(text: str, glossary: dict[str, str]) -> str:
     return text
 
 
-def build_cues(words: list[dict], max_width: float = 22.0, min_duration_s: float = 0.8, glossary: dict | None = None) -> list[dict]:
-    """Chunk at punctuation, never across a sentence end, at most max_width per cue."""
-    glossary = glossary or {}
-    cues: list[dict] = []
-    cur: list[dict] = []
-    text = ""
-
-    def width_with(extra: str) -> float:
-        return _width(apply_glossary(text + extra, glossary))
-
-    def flush():
-        nonlocal cur, text
-        if cur:
-            shown = apply_glossary(text, glossary).strip().rstrip(TRAILING_DROP).strip()
-            if shown:
-                cues.append({"start": cur[0]["start"], "end": cur[-1]["end"], "text": shown})
-        cur, text = [], ""
-
+def _join_words(words: list[dict]) -> str:
+    text, prev = "", ""
     for w in words:
         word = w["text"].strip()
         if not word:
             continue
-        piece = word + w.get("punc", "")
-        sep = " " if cur and _needs_space(cur[-1]["text"].strip(), word) else ""
-        if cur and width_with(sep + piece) > max_width:
-            flush()
-            sep = ""
+        text += (" " if _needs_space(prev, word) else "") + word + w.get("punc", "")
+        prev = word
+    return text
+
+
+def _split_balanced(words: list[dict], max_width: float, glossary: dict) -> list[list[dict]]:
+    """Split one clause into the fewest near-equal pieces that fit, so no piece is a one-character orphan."""
+    width = _width(apply_glossary(_join_words(words), glossary))
+    n = max(1, int(np.ceil(width / max_width)))
+    if n == 1:
+        return [words]
+    target = width / n
+    pieces, cur = [], []
+    for w in words:
         cur.append(w)
-        text += sep + piece
+        if len(pieces) < n - 1 and _width(apply_glossary(_join_words(cur), glossary)) >= target:
+            pieces.append(cur)
+            cur = []
+    if cur:
+        pieces.append(cur)
+    return pieces
+
+
+def build_cues(words: list[dict], max_width: float = 22.0, min_duration_s: float = 0.8, glossary: dict | None = None) -> list[dict]:
+    """Cues never cross a sentence end; clauses are packed up to max_width; a clause longer than that is
+    split into near-equal pieces instead of being filled greedily (which strands a single character)."""
+    glossary = glossary or {}
+    sentences: list[list[list[dict]]] = []
+    sentence: list[list[dict]] = []
+    clause: list[dict] = []
+    for w in words:
+        if not w["text"].strip():
+            continue
+        clause.append(w)
         punc = w.get("punc", "")
         if any(ch in SENTENCE_END for ch in punc):
-            flush()
-        elif any(ch in CLAUSE_END for ch in punc) and width_with("") >= max_width * 0.6:
-            flush()
-    flush()
+            sentence.append(clause)
+            sentences.append(sentence)
+            sentence, clause = [], []
+        elif any(ch in CLAUSE_END for ch in punc):
+            sentence.append(clause)
+            clause = []
+    if clause:
+        sentence.append(clause)
+    if sentence:
+        sentences.append(sentence)
+
+    groups: list[list[dict]] = []
+    for sent in sentences:
+        cur: list[dict] = []
+        for cl in sent:
+            for piece in _split_balanced(cl, max_width, glossary):
+                if cur and _width(apply_glossary(_join_words(cur + piece), glossary)) > max_width:
+                    groups.append(cur)
+                    cur = []
+                cur = cur + piece
+        if cur:
+            groups.append(cur)
+
+    cues = []
+    for g in groups:
+        shown = apply_glossary(_join_words(g), glossary).strip().rstrip(TRAILING_DROP).strip()
+        if shown:
+            cues.append({"start": g[0]["start"], "end": g[-1]["end"], "text": shown})
 
     # Cues that start together would get zero length; merge each into the one that follows.
     merged: list[dict] = []

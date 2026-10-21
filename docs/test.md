@@ -22,6 +22,7 @@ python -m pytest -q
 | `transcribe.py`, `utterances.py` | Punctuation attached from the engine text; punctuation classes; a raw engine dump (`segments` + `chunks`) normalizes to `vlog.transcript/1`; utterances split at pauses with long gaps marked. | Small hand-written transcripts. |
 | `verify.py` | A filler and a doubled syllable near a join are flagged as `review`; allow-listing and an empty filler list clear them; an expected-absent phrase anywhere in the edited text makes the report unclean. | Rendered synthetic edit plus hand-written edited transcripts. |
 | `subtitles.py` | Glossary replacement, the width limit, no merge across a sentence end, trailing punctuation dropped, SRT timestamps from integer milliseconds. | Synthetic word list. |
+| `align.py`, `subtitles.py` (`tests/test_align_subtitles.py`) | A 120 ms shift between two synthetic recordings is measured to within 2 ms and an identical pair reads as aligned; phrases resolve to the first match after `--after`, spaced and unspaced Latin match, a missing phrase raises; a long clause splits into near-equal cues with no orphan; sentence ends are respected. | Synthetic tone-burst recordings and word lists. |
 | `cli.py` | Envelopes and exit codes: `init` succeeds; a missing input file exits 4; an unknown subcommand (including the removed `heygen`) exits 2 with a JSON usage error; an ffmpeg failure exits 5. | `cli.main([...])` with captured stdout. |
 
 ---

@@ -127,6 +127,8 @@ Every command prints a single JSON summary object to `stdout` and passes error d
 | `vlog quiet <audio> --start <s0> --end <s1> [--threshold-db <db>]` | List quiet intervals (`start`, `end`, `min_db`) in a window from a 10 ms RMS envelope | Implemented, tested |
 | `vlog edit <edit_plan.json>` | Render edited WAV and M4A with equal-power crossfades and room-tone pads; write manifest and `ebur128` loudness | Reproduces the first production's edit sample for sample |
 | `vlog verify --manifest <m> --raw <r> --edited <e> --out <json> [--markdown <md>] [--expect-absent <str> ...]` | Compare raw vs. edited text around joins and scan for cut phrases; write JSON and Markdown reports | Run on the first production: flagged the three defects of the first edit, clean on the fixed edit |
+| `vlog offset <reference> <other> --at <s> [...]` | Audio offset between two files at several points (cross-correlation); tells whether an avatar render kept the edited audio's timeline | Checked on the first production |
+| `vlog anchors <transcript.json> --phrase NAME=PHRASE [...]` | Resolve spoken phrases to times; a missing phrase fails | Implemented, tested |
 | `vlog subtitles <transcript.json> --glossary <glossary.json> --out <srt>` | Generate SRT chunked at punctuation (max ~22 CJK chars/cue) with glossary term replacements | Implemented (v0.1) |
 
 ## Project Layout
