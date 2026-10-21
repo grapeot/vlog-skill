@@ -114,6 +114,28 @@ def cmd_subtitles(a) -> dict:
     return {"out": a.out, "cues": len(cues), "short_cues": [{"start": round(c["start"], 2), "text": c["text"]} for c in short]}
 
 
+def cmd_offset(a) -> dict:
+    from .align import offsets
+
+    return offsets(a.reference, a.other, a.at, a.window, a.tolerance_ms)
+
+
+def cmd_anchors(a) -> dict:
+    from .align import anchors
+    from .transcribe import load_transcript
+
+    phrases = {}
+    for item in a.phrase:
+        name, _, phrase = item.partition("=")
+        if not phrase:
+            raise ValueError(f"--phrase must be NAME=PHRASE, got {item!r}")
+        phrases[name] = phrase
+    times = anchors(load_transcript(a.transcript)["words"], phrases, a.after, a.until)
+    if a.out:
+        _write_json(a.out, times)
+    return {"out": a.out, "anchors": times}
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = JsonArgumentParser(prog="vlog", description=__doc__.splitlines()[0])
     p.add_argument("--version", action="version", version=__version__)
@@ -172,6 +194,21 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-width", type=float, default=22.0)
     s.set_defaults(func=cmd_subtitles)
 
+    s = sub.add_parser("offset", help="audio offset between two media files at several points (cross-correlation)")
+    s.add_argument("reference")
+    s.add_argument("other")
+    s.add_argument("--at", type=float, nargs="+", required=True, help="start times in seconds")
+    s.add_argument("--window", type=float, default=30.0)
+    s.add_argument("--tolerance-ms", type=float, default=20.0)
+    s.set_defaults(func=cmd_offset)
+
+    s = sub.add_parser("anchors", help="resolve spoken phrases to times in a transcript")
+    s.add_argument("transcript")
+    s.add_argument("--phrase", action="append", required=True, help="NAME=PHRASE (repeatable)")
+    s.add_argument("--after", type=float, default=0.0)
+    s.add_argument("--until", type=float)
+    s.add_argument("--out")
+    s.set_defaults(func=cmd_anchors)
     return p
 
 
