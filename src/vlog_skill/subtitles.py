@@ -63,6 +63,16 @@ def build_cues(words: list[dict], max_width: float = 22.0, min_duration_s: float
             flush()
     flush()
 
+    # Cues that start together would get zero length; merge each into the one that follows.
+    merged: list[dict] = []
+    for c in cues:
+        if merged and c["start"] - merged[-1]["start"] < 0.05:
+            merged[-1] = {"start": merged[-1]["start"], "end": max(merged[-1]["end"], c["end"]),
+                          "text": merged[-1]["text"] + (" " if _needs_space(merged[-1]["text"], c["text"]) else "") + c["text"]}
+        else:
+            merged.append(c)
+    cues = merged
+
     for i, c in enumerate(cues):
         nxt = cues[i + 1]["start"] if i + 1 < len(cues) else None
         end = max(c["end"], c["start"] + min_duration_s)

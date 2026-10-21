@@ -179,13 +179,16 @@ class Client:
         out = Path(out)
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(out.suffix + ".part")
+        f = open(tmp, "wb")  # a local write failure is not a HeyGen error; let it surface as itself
         try:
-            with self._open(request.Request(data["video_url"]), timeout=max(self.timeout_s, 1800)) as r, open(tmp, "wb") as f:
+            with self._open(request.Request(data["video_url"]), timeout=max(self.timeout_s, 1800)) as r:
                 while chunk := r.read(1 << 20):
                     f.write(chunk)
         except error.HTTPError as exc:
             raise UpstreamError(exc.code, exc.read().decode("utf-8", errors="replace"), "video_url") from exc
         except NETWORK_ERRORS as exc:
             raise UpstreamError(None, f"{type(exc).__name__}: {getattr(exc, 'reason', exc)}", "video_url") from exc
+        finally:
+            f.close()
         tmp.replace(out)
         return resp

@@ -104,7 +104,7 @@ vlog verify \
 
 7. **Human listening checkpoint**: Listen to `/path/to/project/audio/edited.m4a` and approve delivery and pacing.
 
-8. **Generate the avatar video**: Upload `audio/edited.m4a` in the HeyGen web UI (or use `vlog heygen`) and save the output to `/path/to/project/avatar/avatar.mp4`.
+8. **Generate the avatar video**: Upload `audio/edited.m4a` in the HeyGen web UI (subscription credits; about a third of the API price per minute as of 2026-10) or use `vlog heygen upload audio/edited.wav` with an API key (the API takes WAV or MP3), and save the output to `/path/to/project/avatar/avatar.mp4`.
 
 9. **Re-transcribe avatar video and generate subtitles**:
 

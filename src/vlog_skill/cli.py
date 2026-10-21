@@ -31,6 +31,9 @@ class JsonArgumentParser(argparse.ArgumentParser):
         raise UsageError(f"{self.prog}: {message}")
 
 
+_ENV_FILES = [Path(".env")]
+
+
 def _secrets() -> list[str]:
     import os
 
@@ -38,8 +41,9 @@ def _secrets() -> list[str]:
     try:
         from .heygen import _from_env_file
 
-        if Path(".env").is_file():
-            values.append(_from_env_file(Path(".env")) or "")
+        for env_file in _ENV_FILES:
+            if env_file.is_file():
+                values.append(_from_env_file(env_file) or "")
     except Exception:  # noqa: BLE001 - scrubbing must never fail the command
         pass
     out = set()
@@ -139,6 +143,7 @@ def cmd_subtitles(a) -> dict:
 def cmd_heygen(a) -> dict:
     from .heygen import Client, api_key
 
+    _ENV_FILES.append(Path(a.env_file))
     c = Client(api_key(a.env_file))
     if a.heygen_cmd == "me":
         return c.me()

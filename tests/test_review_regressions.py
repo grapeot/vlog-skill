@@ -109,8 +109,11 @@ def test_subtitle_latin_spacing_and_no_overlap():
           for i, (x, p) in enumerate([("Well", ","), ("so", ""), ("plan", ","), ("and", ""), ("ship", ".")])]
     assert build_cues(ws)[0]["text"] == "Well, so plan, and ship."
     close = [{"text": "甲", "start": 1.00, "end": 1.01, "punc": "。"}, {"text": "乙", "start": 1.02, "end": 1.03, "punc": "。"}]
-    cues = build_cues(close)
-    assert cues[0]["end"] <= cues[1]["start"]
+    cues = build_cues(close)  # starting together: merged instead of a zero-length cue
+    assert len(cues) == 1 and cues[0]["text"] == "甲乙" and cues[0]["end"] > cues[0]["start"]
+    apart = [{"text": "甲", "start": 1.00, "end": 1.01, "punc": "。"}, {"text": "乙", "start": 1.10, "end": 1.20, "punc": "。"}]
+    cues = build_cues(apart)
+    assert len(cues) == 2 and cues[0]["end"] <= cues[1]["start"]
 
 
 def test_usage_error_is_json(capsys):
@@ -131,3 +134,21 @@ def test_init_refuses_inside_the_repository(capsys):
     assert cli.main(["init", str(repo / "projects" / "demo")]) == cli.EXIT_INPUT
     assert "inside the vlog-skill repository" in json.loads(capsys.readouterr().out)["error"]["message"]
     assert not (repo / "projects").exists()
+
+
+def test_second_review_lows(tmp_path, monkeypatch):
+    from vlog_skill.verify import _find_phrase
+
+    assert _find_phrase("C++", "We can call a function here.") == []
+    assert _find_phrase("C++", "we use c++ here") == [7]
+    same = [{"text": "好", "start": 1.0, "end": 1.1, "punc": "。"}, {"text": "的", "start": 1.0, "end": 1.2, "punc": "。"}]
+    cues = build_cues(same)
+    assert len(cues) == 1 and cues[0]["end"] > cues[0]["start"]
+    rec = Recorder([{"data": {"status": "completed", "video_url": "https://cdn.example/v.mp4"}}, b"x"])
+    ro = tmp_path / "readonly"
+    ro.mkdir()
+    ro.chmod(0o500)
+    with pytest.raises(OSError) as exc:
+        Client("k", opener=rec).download("v1", ro / "file.mp4")
+    ro.chmod(0o700)
+    assert not isinstance(exc.value, __import__("vlog_skill.heygen", fromlist=["UpstreamError"]).UpstreamError)

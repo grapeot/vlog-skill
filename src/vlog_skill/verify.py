@@ -40,8 +40,9 @@ def _normalize(text: str) -> str:
 def _find_phrase(phrase: str, text: str) -> list[int]:
     """Positions of phrase in text, ignoring case, punctuation and spacing differences."""
     p, s = _normalize(phrase), _normalize(text)
-    if not p:
-        return []
+    if len(p.replace(" ", "")) < len(re.sub(r"\s", "", phrase)) * 0.5 or not p:
+        # mostly symbols (for example "C++"): normalising would change its meaning, search it as written
+        return [m.start() for m in re.finditer(re.escape(phrase.lower()), text.lower())]
     hits = [m.start() for m in re.finditer(re.escape(p), s)]
     if not hits:  # CJK text from an aligner has no spaces; also try with spaces removed
         p2, s2 = p.replace(" ", ""), s.replace(" ", "")

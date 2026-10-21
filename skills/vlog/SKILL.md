@@ -276,19 +276,31 @@ Minimal edit plan:
 
 ## HeyGen Avatar Generation Path
 
+### Choosing a path: subscription credits or the API wallet
+
+HeyGen bills the web subscription and the API separately. Per HeyGen's pricing pages as of 2026-10-20, the same digital-twin render costs about three times as much per minute through an API key as through subscription credits:
+
+| Engine (digital twin) | Web plan | API key |
+| :--- | :--- | :--- |
+| Avatar V | 48 credits/min (Pro: 1,000 credits for $49/month) | $7.20/min |
+| Avatar IV (video look) | 31 credits/min | $4.83/min |
+| Avatar III (video look) | 4 credits/min | $0.60/min |
+
+So when the speaker has a subscription, default to subscription credits (Option A, or the OAuth route below) and use an API key (Option B) only when there is no subscription or the job needs batch automation. Re-check the prices before a long render, and check the remaining monthly credits: one 18-minute Avatar V render uses most of a 1,000-credit month. HeyGen also documents OAuth access (its MCP server, or `heygen auth login --oauth` in the official CLI) as billed to subscription credits, framed as trial-scale; whether a long render works through it is not yet verified.
+
 ### Option A: HeyGen web UI (in use in the first production)
 1. Upload `audio/edited.m4a` or `audio/edited.wav` in the HeyGen web interface.
-2. Select the speaker's private digital twin look and start the render (uses web subscription credits, which are significantly cheaper for long videos than pay-as-you-go API credits).
+2. Select the speaker's private digital twin look and start the render; this uses subscription credits.
 3. Download the finished MP4 to `avatar/avatar.mp4` and proceed to Stage 11.
 
 ### Option B: `vlog heygen` CLI (Implemented Against v3 API; Untested with Real Key)
 - **API Version & Auth**: Uses HeyGen API v3 only (`https://api.heygen.com`, header `X-Api-Key` read from `HEYGEN_API_KEY` environment variable or a gitignored `.env`; never printed). HeyGen v1 and v2 shut down on 2026-10-31.
-- **Billing Warning**: API usage bills from a separate pay-as-you-go wallet, not the web subscription. An 18-minute digital-twin render on the newest engine costs on the order of $100 USD via the API. Always check current prices in HeyGen's documentation and get human confirmation before starting a long API render.
+- **Billing warning**: API usage bills from a separate pay-as-you-go wallet, not the web subscription, at about three times the per-minute cost (see the table above; an 18-minute Avatar V render is about $127 through the API). Get human confirmation before starting a long API render.
 - **Duration Cap**: HeyGen documentation states a 30-minute cap on most pages but a 10-minute cap for audio input on one page. Until verified with a key, split edited audio longer than 10 minutes at a long pause into segments under 10 minutes, render each separately, and concatenate locally with `ffmpeg`.
 - **Workflow**:
   1. Verify credentials: `vlog heygen me`
   2. Find the digital twin's look ID: `vlog heygen looks` (queries `GET /v3/avatars/looks?avatar_type=digital_twin&ownership=private`; use the look `id` as `--avatar-id` after checking `status` and `supported_api_engines`).
-  3. Upload audio: `vlog heygen upload audio/edited.wav` (WAV or MP3 only; an M4A is rejected, convert it first; uses `POST /v3/assets` multipart for files <= 32 MB, or 3-step direct upload via `POST /v3/assets/direct-uploads`, `PUT` with verbatim `upload_headers`, and `POST /v3/assets/{asset_id}/complete` for larger files; `asset_id` does not expire).
+  3. Upload audio: `vlog heygen upload audio/edited.wav` (WAV or MP3 only; an M4A is rejected, convert it first; uses `POST /v3/assets` multipart for files <= 32 MB, or 3-step direct upload via `POST /v3/assets/direct-uploads`, `PUT` with the returned `upload_headers` (plus the file's Content-Type if they carry none), and `POST /v3/assets/{asset_id}/complete` for larger files; `asset_id` does not expire).
   4. Submit job: `vlog heygen create --avatar-id <look_id> --audio-asset-id <asset_id> --engine avatar_iv --resolution 1080p --aspect-ratio 16:9 --format mp4 --idempotency-key <uuid>` (sends `POST /v3/videos` with `type: "avatar"`; true 4K is supported only on Avatar III with a 4K-trained twin; `webm` provides an alpha channel only for a matting-trained twin on single-scene requests; `Idempotency-Key` replays the original response for 24 hours).
   5. Wait and download: `vlog heygen wait <video_id> --timeout 7200 --interval 30` then `vlog heygen download <video_id> --out avatar/avatar.mp4` (polls `GET /v3/videos/{video_id}`; treats unknown non-terminal statuses such as `"waiting"` as running; fetches a fresh presigned `video_url` before downloading).
 - **Alternative Official Tooling**: HeyGen also provides an official CLI (`heygen video create --wait`, `heygen video download`) and an MCP server.

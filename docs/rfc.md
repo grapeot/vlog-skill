@@ -17,7 +17,7 @@ All state is exchanged through files in a project workspace outside the code rep
 │   ├── raw/
 │   │   └── take1.m4a          # Continuous human voice recording
 │   ├── edited.wav             # Rendered 48 kHz PCM edit
-│   └── edited.m4a             # Rendered AAC edit for listening & HeyGen upload
+│   └── edited.m4a             # Rendered AAC edit for listening and the HeyGen web UI (the API takes the WAV)
 ├── asr/
 │   ├── raw.json               # vlog.transcript/1 of audio/raw/take1.m4a
 │   ├── edited.json            # vlog.transcript/1 of audio/edited.wav
@@ -254,10 +254,10 @@ Written by `vlog verify` (synthetic example: an edit that left a doubled syllabl
 1. Decode the source to 48 kHz stereo float32 with ffmpeg; take the room-tone slice.
 2. Drop every word whose midpoint lies inside a cut. Give zero-length aligner words 50 ms.
 3. Group the kept words into islands. Start a new island when a cut lies between two words (`cut.start >= prev.start - 0.05` and `cut.end <= next.end + 0.05`), or when the raw gap exceeds `keep_gap_s` for the punctuation class of the previous word (`period` if it contains 。？！.?!, `comma` if it contains ，；：、,;:, else `none`). Gaps inside an island are kept exactly as recorded.
-4. Refine each island's edges on the waveform: pad by `pre_pad_s`/`post_pad_s`, then keep extending in half-window steps while the mean square energy over `energy_window_s` stays at or above `energy_threshold_mean_sq`, up to `max_onset_extension_s` before the first word and `max_release_extension_s` after the last. All of this is clamped to the neighbouring islands' word times (with 20 ms margin) and to every cut that ends before the midpoint of the island's first word or starts after the midpoint of its last word. Comparing against midpoints matters: when the aligner stretches a kept word over a filler or a repeated syllable, the cut starts inside that word's token span, and the island must stop at the cut. An island that the cuts reduce to less than 20 ms is dropped and listed in `dropped_islands`.
+4. Refine each island's edges on the waveform: pad by `pre_pad_s`/`post_pad_s`, then keep extending in half-window steps while the mean square energy over `energy_window_s` stays at or above `energy_threshold_mean_sq`, up to `max_onset_extension_s` before the first word and `max_release_extension_s` after the last. All of this is clamped to the neighbouring islands' word times (with 20 ms margin) and to every cut that ends before the midpoint of the island's first word (or within 50 ms after its start) or starts after the midpoint of its last word (or within 50 ms before its end). Comparing against midpoints matters: when the aligner stretches a kept word over a filler or a repeated syllable, the cut starts inside that word's token span, and the island must stop at the cut. An island that the cuts reduce to less than 20 ms is dropped and listed in `dropped_islands`.
 5. Assemble: `lead_in_s` of room tone, then each island, then a room-tone pad, joined with `crossfade_ms` equal-power crossfades (cos/sin quarter-period). The pause after island `k` is:
    - `section_pause_s` if the next island starts within `section_match_window_s` of a `section_starts` entry;
-   - else `after_major_cut_s[class]` if a major cut lies between the last word of `k` and the first word of `k+1` (with 0.15 s tolerance);
+   - else `after_major_cut_s[class]` if a major cut lies between the last word of `k` and the first word of `k+1` (with 0.15 s tolerance, or between the midpoints of those two words);
    - else `after_micro_cut_s[class]` if only micro cuts lie there;
    - else (a stall longer than `keep_gap_s`) `long_gap_s[class]`, using the larger target when the raw gap exceeds the threshold.
    The pad length is `pause - edge_quiet_margin_s` plus the two crossfades, because the refined edges already carry some quiet. Pads are cut from the room tone at an offset that varies with the island index; the final island is followed by `tail_s` of room tone.
