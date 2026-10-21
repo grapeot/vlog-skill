@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.env
+.pytest_cache/
+dist/
+build/
+.DS_Store
+
+# media and per-production artifacts never belong in this repository
+*.wav
+*.m4a
+*.mp3
+*.mp4
+*.mov
+*.webm
+projects/
+*.aac
+*.flac
+*.mkv
+*.srt
