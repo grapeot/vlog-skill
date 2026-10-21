@@ -27,6 +27,7 @@ def test_offsets_detect_a_shift(tmp_path):
 def test_anchors_resolve_phrases_and_fail_loudly():
     words = [{"text": c, "start": float(i), "end": i + 0.5} for i, c in enumerate("AB赛马跑完再看AB赛马")]
     assert anchors(words, {"race": "AB 赛马"}) == {"race": 0.0}
+    assert anchors(words, {"race": "AB，赛马"}) == {"race": 0.0}  # punctuation copied from the text is ignored
     assert anchors(words, {"race": "AB赛马"}, after=3) == {"race": 8.0}
     with pytest.raises(KeyError):
         anchors(words, {"x": "不存在"})
@@ -61,3 +62,20 @@ def test_clauses_are_packed_and_sentence_ends_respected():
     cues = build_cues(_words("你做一个报表，你完全可以让两个AI各自算一遍。下一句。"), 20)
     assert cues[-1]["text"] == "下一句"
     assert all(not c["text"].endswith(("，", "。")) for c in cues)
+
+
+def test_long_clause_cuts_at_a_clause_opener_not_inside_a_word():
+    # one clause, no punctuation, one character per aligner word (as CJK aligners emit)
+    text = "我们今天先把这个问题的来龙去脉讲清楚然后再去看看具体有哪些解决方法。"
+    cues = build_cues(_words(text), 20)
+    pieces = [c["text"].rstrip("。") for c in cues]
+    assert "".join(pieces) == text.rstrip("。")
+    assert len(pieces) == 2
+    assert pieces == ["我们今天先把这个问题的来龙去脉讲清楚", "然后再去看看具体有哪些解决方法"], pieces
+
+
+def test_long_clause_without_an_opener_cuts_after_a_particle():
+    text = "这是一个我们在很多地方都会遇到的非常具体而且非常麻烦的问题。"
+    pieces = [c["text"].rstrip("。") for c in build_cues(_words(text), 16)]
+    assert "".join(pieces) == text.rstrip("。") and len(pieces) == 2
+    assert pieces[0].endswith(("的", "了", "是", "在")) or pieces[1].startswith("而且"), pieces

@@ -15,6 +15,7 @@ import numpy as np
 from .audio import load_audio
 
 SR = 8000
+_SKIP = set(" ，。？！；：、,.?!;:\"'“”‘’（）()")
 
 
 def offset_at(reference: str, other: str, at: float, window: float = 30.0) -> dict:
@@ -41,17 +42,21 @@ def offsets(reference: str, other: str, points: list[float], window: float = 30.
 
 def anchors(words: list[dict], phrases: dict[str, str], after: float = 0.0, until: float | None = None) -> dict[str, float]:
     """First occurrence of each phrase starting at or after `after` (and before `until`), as the start
-    time of its first word. Spaces are ignored on both sides. A phrase that is not found raises, so a
+    time of its first word. Spaces and punctuation are ignored on both sides (aligner words carry no
+    punctuation, so a phrase copied from the transcript text with its commas must still match). A phrase that is not found raises, so a
     reworded line cannot silently drift its picture beat."""
+    def strip(s: str) -> str:
+        return "".join(ch for ch in s if ch not in _SKIP)
+
     chars, owner = [], []
     for i, w in enumerate(words):
-        for ch in w["text"].replace(" ", ""):
+        for ch in strip(w["text"]):
             chars.append(ch)
             owner.append(i)
     text = "".join(chars)
     out, missing = {}, []
     for name, phrase in phrases.items():
-        p = phrase.replace(" ", "")
+        p = strip(phrase)
         pos, found = 0, None
         while True:
             k = text.find(p, pos)

@@ -40,22 +40,64 @@ def _join_words(words: list[dict]) -> str:
     return text
 
 
+_GOOD_END = set("的了呢啊吧吗嘛呀么着过就是在和说")  # a CJK piece may end after these without cutting a word in two
+_BAD_START = set("的了呢啊吧吗嘛呀么着过们")  # ... and should not start with these
+_GOOD_START = ("然后", "但是", "所以", "因为", "如果", "而且", "那么", "我们", "你们", "他们", "这个", "那个", "就是",
+               "其实", "可以", "还是", "或者", "比如", "只要", "不过", "而是")  # common clause openers
+
+
+def _is_latin(text: str) -> bool:
+    return any(ch.isascii() and ch.isalnum() for ch in text)
+
+
+def _cut_penalty(words: list[dict], k: int) -> int:
+    """Cost of cutting between words[k-1] and words[k]. CJK aligners emit one character per word, so a cut
+    between two arbitrary characters can split a word ("机" | "器"); prefer cuts after a particle or at a
+    change of script."""
+    prev, nxt = words[k - 1]["text"].strip(), words[k]["text"].strip()
+    if nxt[:1] in _BAD_START:
+        return 3
+    if "".join(w["text"].strip() for w in words[k:k + 2]).startswith(_GOOD_START):
+        return 0
+    if prev[-1:] in _GOOD_END or _is_latin(prev) != _is_latin(nxt) or (_is_latin(prev) and _is_latin(nxt)):
+        return 0
+    return 2
+
+
 def _split_balanced(words: list[dict], max_width: float, glossary: dict) -> list[list[dict]]:
-    """Split one clause into the fewest near-equal pieces that fit, so no piece is a one-character orphan."""
-    width = _width(apply_glossary(_join_words(words), glossary))
-    n = max(1, int(np.ceil(width / max_width)))
+    """Split one clause into the fewest near-equal pieces that fit, so no piece is a one-character orphan,
+    moving each cut up to a few characters to land on a likely word boundary."""
+    def width(ws):
+        return _width(apply_glossary(_join_words(ws), glossary))
+
+    total = width(words)
+    n = max(1, int(np.ceil(total / max_width)))
     if n == 1:
         return [words]
-    target = width / n
-    pieces, cur = [], []
-    for w in words:
-        cur.append(w)
-        if len(pieces) < n - 1 and _width(apply_glossary(_join_words(cur), glossary)) >= target:
-            pieces.append(cur)
-            cur = []
-    if cur:
-        pieces.append(cur)
-    return pieces
+    target = total / n
+    pieces, start = [], 0
+    for j in range(1, n):
+        best = None
+        for k in range(start + 1, len(words)):
+            w_piece = width(words[start:k])
+            if w_piece > max_width:
+                break
+            done = width(words[:k])
+            off = abs(done - target * j)
+            if off > 4 or (j == n - 1 and total - done > max_width):
+                continue
+            cost = off + 1.5 * _cut_penalty(words, k)
+            if best is None or cost < best[0]:
+                best = (cost, k)
+        if best is None:  # no cut near the target fits; fall back to the first point past it
+            k = start + 1
+            while k < len(words) - 1 and width(words[:k]) < target * j:
+                k += 1
+            best = (0, k)
+        pieces.append(words[start:best[1]])
+        start = best[1]
+    pieces.append(words[start:])
+    return [p for p in pieces if p]
 
 
 def build_cues(words: list[dict], max_width: float = 22.0, min_duration_s: float = 0.8, glossary: dict | None = None) -> list[dict]:

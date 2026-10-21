@@ -16,9 +16,9 @@ Produce a rendered explainer video in which the speaker's own digital-twin avata
 | Stages 1–9 (research, script, recording, transcription, edit, verify, listening) | Exercised in one production | A ~17-minute Chinese technical explainer; `vlog edit` reproduces that production's edit sample for sample |
 | Stage 10, HeyGen (web UI or official CLI with OAuth) | Exercised in that production | Full-length render in the web UI; a 60-second test through the official CLI with OAuth (see "Avatar video with HeyGen") |
 | Stage 11 (picture clock) | Exercised in the first production | `vlog offset` found 160 ms of drift in the Video Agent render; the picture is timed from its transcript |
-| Stages 12–13 (storyboard, look development, B-roll) | In progress in the first production | Four look-development stills through three independent review rounds; one 33 s segment rendered both in SVG/Remotion and in Python |
-| `vlog subtitles` | Implemented, tested on synthetic data | Punctuation-aware SRT with a glossary |
-| Stage 14 (compose and render) | Planned | Not implemented in v0.1 |
+| Stages 12–13 (storyboard, look development, B-roll) | Exercised in the first production, second pass | A per-line illustration pass was rejected after a 3 min 52 s checkpoint; the second pass (argument-map canvas) covered the full film and went through one independent cognitive-load review before the owner's review |
+| `vlog subtitles` | Exercised in the first production | Punctuation-aware cues with a glossary; long clauses are cut near word boundaries |
+| Stage 14 (compose and render) | Exercised once with a project-local renderer | The CLI does not compose; the first production rendered 17.8 minutes of 1080p25 in about 100 s with 10 worker processes, then applied a 1.1x speed change |
 | Stage 15 (final QA) | Designed, not yet exercised | |
 
 ### Boundaries and Responsibilities
@@ -146,26 +146,30 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
   - Every animation entrance and subtitle cue matches the spoken words in `avatar/avatar.mp4` across the full duration without cumulative drift.
 
 ### Stage 12: Storyboard and Subtitles
-- **Goal**: Design the visual composition timeline keyed to phrases in `asr/avatar.json` and generate corrected SRT subtitles.
-- **Artifacts**: `storyboard/storyboard.md`, `subtitles/glossary.json`, `subtitles/subtitles.srt`
+- **Goal**: Extract the argument structure and design the visual composition timeline keyed to phrases in `asr/avatar.json`, and generate corrected SRT subtitles.
+- **Artifacts**: `storyboard/argument_map.md`, `storyboard/storyboard.md`, `subtitles/glossary.json`, `subtitles/subtitles.srt`
 - **Acceptance Criteria**:
-  1. Every segment in `storyboard/storyboard.md` is anchored to exact phrases and timestamps from `asr/avatar.json` (never from `writing/script.md`, which the speaker may have departed from).
-  2. Every segment specifies:
-     - Composition mode: `avatar_full`, `avatar_side_panel`, `avatar_corner`, or `broll_only`
-     - B-roll asset description or path
+  1. `storyboard/argument_map.md` is produced before `storyboard/storyboard.md` and extracts the argument from `asr/avatar.json`: the overarching question, the sections, the claims under each section, and the relationship between them (mapping, cause, contrast, sequence, part-whole, or quantity).
+  2. Every segment in `storyboard/storyboard.md` is anchored to exact phrases and timestamps from `asr/avatar.json` (never from `writing/script.md`, which the speaker may have departed from).
+  3. Every segment specifies:
+     - Composition mode: `canvas` (speaker in a small fixed box, canvas is the subject), `avatar_full`, `avatar_side_panel`, `avatar_corner`, or `broll_only`
+     - Persistent map state (which section is active, which rows or items are dimmed, which are empty or `?`, and whether the map is zooming out at a section start or rolling up a takeaway at a section end) and stage content encoding the claim's relationship
+     - Optional B-roll or illustration plate description or path (only when needed to carry a relationship)
      - Anchor phrase where each visual event or transition lands
      - Sound effects (if any)
-  3. `subtitles/glossary.json` maps ASR-misrecognized technical terms (for example, English product names or acronyms inside Chinese speech) to their canonical spellings.
-  4. `vlog subtitles asr/avatar.json --glossary subtitles/glossary.json --out subtitles/subtitles.srt` produces an SRT file where cues split at punctuation, never cross a sentence end, and contain at most ~22 CJK characters per cue.
-- **Advice**: Keep any single `avatar_full` stretch short and give the viewer's eye structured visual information to read at every beat.
+  4. `subtitles/glossary.json` maps ASR-misrecognized technical terms (for example, English product names or acronyms inside Chinese speech) to their canonical spellings.
+  5. `vlog subtitles asr/avatar.json --glossary subtitles/glossary.json --out subtitles/subtitles.srt` produces an SRT file where cues split at punctuation, never cross a sentence end, and contain at most ~22 CJK characters per cue.
+- **Advice**: Build the storyboard around `storyboard/argument_map.md` using the `canvas` mode as the default body layout after a brief opening title and `avatar_full` introduction; make sure every stage beat encodes a relationship rather than illustrating spoken nouns, keep on-screen labels to the speaker's short key terms without repeating the subtitle, and keep all timestamps on the original `asr/avatar.json` clock even if a final speed factor will be applied later.
 
 ### Stage 13: B-roll Production
-- **Goal**: Produce all animations, illustrations, screen recordings, and music tracks required by `storyboard/storyboard.md`.
+- **Goal**: Produce the programmatic canvas animations, diagrams, screen recordings, optional illustration plates, and music tracks required by `storyboard/storyboard.md`.
 - **Artifacts**: Files under `broll/` and `audio/music/`
 - **Acceptance Criteria**:
-  1. Every B-roll asset referenced in `storyboard/storyboard.md` exists on disk.
-  2. Generated illustrations follow one consistent visual style across the video.
-  3. Procedural frame sequences and music beds are produced using the sibling skill at `https://github.com/grapeot/opus-video-audio-skill`.
+  1. Every visual asset referenced in `storyboard/storyboard.md` exists on disk.
+  2. Programmatic map and stage views encode the relationships specified in `storyboard/argument_map.md`, keep about five or fewer live items on the stage, and maintain consistent wording, position, and colour meaning across sections.
+  3. If illustration plates are used for beats where an image carries a relationship better than a diagram, all plates follow one consistent visual style across the video.
+  4. Procedural frame sequences and music beds are produced using the sibling skill at `https://github.com/grapeot/opus-video-audio-skill`.
+- **Advice**: Treat image-model illustration plates as optional; rely primarily on programmatic diagrams and tables for the map and stage layers, and generate an illustration plate only when it communicates a relationship more clearly than a diagram.
 
 ### Stage 14: Compose and Render (Planned — Not Implemented in v0.1)
 - **Goal**: Composite the avatar video, B-roll overlays, burned-in and muxed subtitles, sound effects, and ducked music bed into a final video normalized to -16 LUFS integrated loudness.
@@ -212,6 +216,7 @@ Running `vlog init /path/to/project` creates the workspace outside the code repo
 ├── avatar/
 │   └── avatar.mp4
 ├── storyboard/
+│   ├── argument_map.md
 │   └── storyboard.md
 ├── subtitles/
 │   ├── glossary.json
@@ -312,14 +317,72 @@ heygen video download <video id> --output-path avatar/avatar.mp4
 
 Not yet exercised: audio over 32 MB through the CLI (`heygen asset direct-uploads create` and `heygen asset complete create`, or upload an MP3 instead), a full-length render through the CLI (HeyGen's documentation gives 30 minutes per request on most pages and 10 minutes for audio input on one), and transparent `webm` output (only for a digital twin trained with matting).
 
+## Picture design: lower the viewer's cognitive load
+
+### Why per-line illustration failed in the first checkpoint
+
+The first production was an approximately 18-minute Chinese explainer with a layered argument: a general question, three complaints, the finding that reading code is three different jobs, each complaint mapping to one job, one section per job with its own mechanism, and a conclusion.
+
+The first rendered checkpoint (the opening 3 min 52 s) followed a per-line illustration approach: for each line or few lines, an engraving-style illustration plate (a desk with a paper stack, a code page with a magnifier, a form with a rubber stamp, a three-strand rope, an antique key) paired with a short serif caption that typed on when the speaker said the keyword, with the speaker's video in a framed side panel and burned-in subtitles. The render was technically clean: it ran at 8x real time and captions were anchored to the spoken words.
+
+The owner rejected the checkpoint as "visuals for visuals' sake". It attached a visual element to what was being said at each moment, but because the script's logic peeled a problem layer by layer into three sides, per-line pictures did not help the viewer follow the structure of the argument.
+
+### Goal
+
+The goal of the picture is to make the talk easy to digest with low cognitive burden:
+
+- **Canvas as main subject**: The main subject of the screen is a structured visual canvas, not the speaker.
+- **Visible argument state**: At any point in the video, the viewer can see which step of the argument the talk is on and how the pieces relate to one another.
+- **Two regions at two tempos**: A high-level region changes slowly across sections; a low-level region changes quickly across claims.
+
+### Approach adopted for the second pass
+
+The following design was adopted for the second pass (stated here as the design adopted, prior to owner validation on the full render):
+
+- **Argument map before drawing**: Before designing visuals, extract the argument map from the transcript: the opening question, the sections, the claims under each section, and the relations between them (mapping, cause, contrast, sequence, part-whole, quantity). In the first production, the whole argument fit one table: three rows (the three jobs of reading code) with columns for the complaint, the job, and the mechanism, plus an opening question and a closing list.
+- **Two layers with two tempos**:
+  - **Map layer (persistent, high level)**: Changes only at section boundaries and shows where the viewer is in the talk. The current row is highlighted, finished rows are dimmed but remain visible, and future cells are empty or marked with `?`.
+  - **Stage layer (low level)**: Shows the current claim and its example, changing at claim boundaries.
+  - **Build, zoom out, and roll up**: The stage content built during the opening becomes the map, so the viewer sees the map constructed rather than handed to them ready-made. At the start of a section, the map expands to fill the screen for a few seconds (zoom out: showing where we are), then shrinks back to its rail. At the end of a section, the section's takeaway is written into the map in the speaker's words (roll up).
+- **Relationship test for every stage element**: Every element on the stage must encode a relationship (for example: two speeds compared, A versus B, a sequence of stations, a funnel from many candidates to few, or a boundary moving). Apply this test to each beat: if the picture were removed, would the viewer lose a relationship? If the picture only depicts a noun the speaker said, cut it.
+- **Persistence and visual consistency**:
+  - A concept keeps the same words, colour, and screen position everywhere in the video.
+  - New elements arrive in full ink; older elements dim instead of disappearing so context stays visible.
+  - Keep about five or fewer live items on the stage at one time.
+  - Keep one meaning per colour across the film. In a table whose rows are already identified by number and position, do not spend colour on row identity.
+- **On-screen words**: Use the speaker's own key terms as short labels, not full sentences, and do not repeat the subtitle text on the canvas.
+- **Speaker layout**: When there is no self-introduction, open with a title card, then show the speaker full-frame for the first couple of sentences, then move the speaker to a small fixed box in a corner for the rest of the film because the face is not the main subject. In the second pass, the left rail holds the question, the map, and the speaker's box; the stage occupies the right two thirds of the frame; subtitles sit centred under the stage.
+- **Optional illustration plates**: Illustration plates from an image model are optional. Use a plate only where an image carries a relationship better than a diagram.
+
+### Pace adjustment and the one-clock rule
+
+When the owner asks to speed up speech slightly without changing pitch, picture and sound must be sped up together because the avatar's lips are synced to the audio:
+
+- **Constraint (one-clock rule)**: Render the picture on the original clock (the clock of the avatar transcript) so all visual anchors and subtitle timestamps use a single clock throughout production. Apply the speed change only as the final step.
+- **Final-step transform**: On the final render, apply video filter `setpts=PTS/<factor>` and audio filter `atempo=<factor>` (ffmpeg's `atempo` performs a pitch-preserving time stretch), and divide every subtitle timestamp by `<factor>`. In the second pass, the factor chosen was `1.1`, reducing a 17 min 43 s video to about 16 min 6 s.
+
+### Reviewer rubric
+
+An independent reviewer checks stills each round using a cognitive-load rubric rather than checking only visual style or line-by-line illustration: looking at a single frame in isolation, can a viewer state what question is being answered, which section the talk is in, and how the current item relates to the previous one?
+
+### Acceptance Criteria
+
+1. `storyboard/argument_map.md` exists before `storyboard/storyboard.md` is written and lists the opening question, sections, claims under each section, and the explicit relationship type (mapping, cause, contrast, sequence, part-whole, or quantity) for each claim.
+2. After the opening title card and initial full-frame sentences, the layout keeps the speaker in a small fixed box while the canvas (persistent map layer plus claim-level stage layer) occupies the main area of the screen.
+3. At every section boundary, the render includes a zoom-out beat where the map expands and highlights the active section, and at every section end it rolls the takeaway in the speaker's words into the map while dimming completed rows and leaving future cells empty or `?`.
+4. Every stage beat passes the relationship test: removing the stage graphic removes a visualised relationship (comparison, sequence, funnel, boundary shift, mapping, cause, or part-whole), and no beat consists solely of a literal illustration of a spoken noun.
+5. Each stage frame contains about five or fewer live items, retains consistent wording, position, and colour meaning across the video, dims prior elements rather than deleting them mid-section, and uses short key-term labels that do not duplicate the burned-in subtitle.
+6. An independent reviewer evaluating sampled stills can identify from each still alone: the overarching question, the active section, and how the current item relates to the preceding one.
+7. If a playback speed factor `<factor>` is applied, intermediate renders and anchors match the original `asr/avatar.json` clock, and the final output applies `setpts=PTS/<factor>`, `atempo=<factor>`, and subtitle timestamps divided by `<factor>`.
+
 ## Picture: look development and rendering
 
 ### Splitting plates and code
 
-Divide visual elements by what each element needs to do:
+Subordinate all visual elements to the argument map and divide them by what each element needs to do:
 
-- **Illustration plates from an image model**: Use an image model only for figurative subjects (for example: a clerk at a desk, racehorses, a sorting machine, or a coastline). Generate all plates with one shared style paragraph (19th-century steel engraving, ink only, plain paper, no text). In the first production, the first four plates came out consistent on the first try.
-- **Exact and animated elements in code**: Draw everything that must be exact or must move on a spoken word in code: labels, numbers, tables, arrows, boundaries, subtitles, and the speaker's video.
+- **Exact and animated elements in code (primary)**: Draw the persistent argument map, stage diagrams, relationships (comparisons, sequences, funnels, moving boundaries), short key-term labels, numbers, tables, arrows, subtitles, and the speaker's video box in code so every transition lands on its spoken anchor word.
+- **Illustration plates from an image model (optional)**: Illustration plates are not required for every beat. Use an image model only when a figurative image carries a relationship in the argument map better than a diagram (for example, a scene whose figures carry the comparison, which a diagram would only label). Cut any plate that merely depicts a noun the speaker said. When plates are used, generate them with one shared style paragraph (such as 19th-century steel engraving, ink only, plain paper, no text); in the first production, the first four plates came out consistent on the first try.
 - **Constraint**: Do not generate whole frames with an image model. An image model cannot animate on a timeline, regenerating a frame alters the rest of the picture, and exact figures and Chinese text are not guaranteed.
 
 ### Printing plates onto the page
@@ -419,3 +482,9 @@ An agent can verify look development and rendering against these checks:
 | 15 | Subtitle cues ended or began with a single character ("特别便" then "宜") | Greedy packing up to a width limit splits a clause at an arbitrary character | Split clauses into the fewest near-equal pieces; never cross a sentence end (now the behaviour of `vlog subtitles`). |
 | 16 | A glossary entry did not match | ASR wrote "A B赛马" with a space between Latin letters | Add the spaced form to the glossary. |
 | 17 | Look-development frames read as a slide deck pasted onto an engraving | Boxes, straight geometric overlays, colour washes, guessed positions | Independent reviewer every round; captions not boxes; derive overlays from the plate; measure positions from the plate. |
+| 18 | A parallel frame render hung with no output and no error | On macOS, `multiprocessing` starts workers by re-importing the main module; a render script without an `if __name__ == "__main__":` guard re-ran itself in every worker | Put the entry point behind the guard. With it, 232 s of 1080p25 rendered in 29 s on 8 workers. |
+| 19 | Underlines cut through descenders (the "p" in "ship it") on centred captions | Text was measured with a centre anchor but drawn with a left anchor, so the two disagreed vertically | Measure and draw text with the same anchor; compute the left edge from the text width for centred captions. |
+| 20 | Viewer cannot follow a multi-layer argument despite clean per-line illustrations and word-anchored captions ("visuals for visuals' sake") | Storyboard attached an illustration plate and caption to nouns in each spoken line instead of mapping the structure of the argument | Extract `storyboard/argument_map.md` before drawing; make a two-layer canvas the main subject (a persistent high-level map layer that zooms out at section starts and rolls up takeaways at section ends, plus a low-level stage layer for the current claim); keep the speaker in a small fixed box after the opening; cut any visual that only depicts a spoken noun rather than encoding a relationship |
+| 21 | A subtitle cue broke a Chinese word in two ("机" at the end of one cue, "器" at the start of the next) | CJK aligners emit one character per word, so a balanced split could land between two characters of one word | `vlog subtitles` now moves each cut up to four characters to land after a particle, before a common clause opener (然后, 但是, 所以 ...), or at a change of script, never before a particle, and checks that the remainder still fits. |
+| 22 | The reviewer read a red cross beside "double check" as "double check is wrong", although double check was the answer to an earlier row | A rejection mark was put on the concept rather than on its limitation in this context | In a contrast, mark the limitation in words ("same angle: cannot see beyond the diff"); keep red for the frame's single problem and audit every frame for a second red. |
+| 23 | Audio checks against the avatar track showed correlation 0.7 at 0 ms offset after adding a title card in front | ffmpeg `adelay=3000` delays only the first channel of stereo audio; the downmix mixed delayed and undelayed channels | Use `adelay=<ms>:all=1` when delaying a stereo track (the render used it; the check command had not). |
