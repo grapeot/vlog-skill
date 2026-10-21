@@ -102,12 +102,13 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
   - Preserve the speaker-approved pacing defaults in `edit/edit_plan.json`: keep natural pauses untouched, shorten only stalls exceeding the thresholds, and refill shortened pauses with room tone rather than digital silence.
 
 ### Stage 7: Render the Edit
-- **Goal**: Render the edited voice-over with raised-cosine crossfades and room-tone pads, and record the exact raw-to-output time mapping and loudness metrics.
+- **Goal**: Render the edited voice-over with equal-power crossfades and room-tone pads, and record the exact raw-to-output time mapping and loudness metrics.
 - **Artifacts**: `audio/edited.wav`, `audio/edited.m4a`, `edit/manifest.json`
 - **Acceptance Criteria**:
   1. `vlog edit edit/edit_plan.json` exits with code 0 and prints a JSON summary containing `edited_duration_s` and `loudness` (`integrated_lufs`, `true_peak_dbfs`).
   2. `audio/edited.wav`, `audio/edited.m4a`, and `edit/manifest.json` exist on disk.
   3. Every kept audio island in `edit/manifest.json` has `raw_start`, `raw_end`, `out_start`, and `out_end`, allowing any timestamp in the edited audio to map back to the raw recording.
+  4. Every entry in the summary's `warnings` (`cut_edge_in_speech`) has been looked at: either the edge was moved into a quiet run, or it is a stutter removal whose end edge sits on the next syllable's onset. `dropped_islands` is empty or explained.
 
 ### Stage 8: Verify the Edit (Mandatory Loop with Stages 6–7)
 - **Goal**: Re-transcribe the rendered audio and verify every join and deleted phrase to catch clipped syllables or residual fillers left by aligner inaccuracy.
@@ -287,7 +288,7 @@ Minimal edit plan:
 - **Workflow**:
   1. Verify credentials: `vlog heygen me`
   2. Find the digital twin's look ID: `vlog heygen looks` (queries `GET /v3/avatars/looks?avatar_type=digital_twin&ownership=private`; use the look `id` as `--avatar-id` after checking `status` and `supported_api_engines`).
-  3. Upload audio: `vlog heygen upload audio/edited.wav` (uses `POST /v3/assets` multipart for files <= 32 MB, or 3-step direct upload via `POST /v3/assets/direct-uploads`, `PUT` with verbatim `upload_headers`, and `POST /v3/assets/{asset_id}/complete` for larger files; `asset_id` does not expire).
+  3. Upload audio: `vlog heygen upload audio/edited.wav` (WAV or MP3 only; an M4A is rejected, convert it first; uses `POST /v3/assets` multipart for files <= 32 MB, or 3-step direct upload via `POST /v3/assets/direct-uploads`, `PUT` with verbatim `upload_headers`, and `POST /v3/assets/{asset_id}/complete` for larger files; `asset_id` does not expire).
   4. Submit job: `vlog heygen create --avatar-id <look_id> --audio-asset-id <asset_id> --engine avatar_iv --resolution 1080p --aspect-ratio 16:9 --format mp4 --idempotency-key <uuid>` (sends `POST /v3/videos` with `type: "avatar"`; true 4K is supported only on Avatar III with a 4K-trained twin; `webm` provides an alpha channel only for a matting-trained twin on single-scene requests; `Idempotency-Key` replays the original response for 24 hours).
   5. Wait and download: `vlog heygen wait <video_id> --timeout 7200 --interval 30` then `vlog heygen download <video_id> --out avatar/avatar.mp4` (polls `GET /v3/videos/{video_id}`; treats unknown non-terminal statuses such as `"waiting"` as running; fetches a fresh presigned `video_url` before downloading).
 - **Alternative Official Tooling**: HeyGen also provides an official CLI (`heygen video create --wait`, `heygen video download`) and an MCP server.
@@ -310,7 +311,7 @@ Minimal edit plan:
 
 | # | Symptom | Root Cause | Remedy |
 | :--- | :--- | :--- | :--- |
-| 1 | Cut defined on token timestamps leaves a filler ("呃") or the first of two repeated syllables in `audio/edited.wav` | Forced-aligner timestamps are approximate right where cuts happen (a 260 ms filler was assigned 80 ms; a repeated syllable's audio was attributed to the preceding token) | Always place cut `start` and `end` inside quiet intervals measured on the waveform with `vlog quiet`, then confirm with `vlog verify`. |
+| 1 | Cut defined on token timestamps leaves a filler ("呃") or the first of two repeated syllables in `audio/edited.wav` | Forced-aligner timestamps are approximate right where cuts happen (a 260 ms filler was assigned 80 ms; a repeated syllable's audio was attributed to the preceding token) | Always place cut `start` and `end` inside quiet intervals measured on the waveform with `vlog quiet`, then confirm with `vlog verify`. `vlog edit` lists edges that still sit inside speech energy under `warnings`. |
 | 2 | Deleted syllable reappears at the edge of a kept island after rendering | Renderer pads island edges and extends them while energy stays high to protect consonants; unclamped extension reaches back into the cut region | Clamp edge-padding and high-energy extension in `edit.py` strictly to cut boundaries (`cuts[i].start` and `cuts[i].end`). |
 | 3 | Edited audio sounds breathless and unnatural to the speaker | Compressing all breath pauses to ~0.2 s destroys natural cadence | Use the speaker-approved pacing defaults: keep natural pauses below `pacing.keep_gap_s` untouched; only shorten long stalls and refill them with measured `room_tone`, never digital silence. |
 | 4 | Token-overlap heuristic flags a clean join as a residue false positive | Forced-aligner token boundaries drift near cuts, making a deleted token appear to overlap kept audio | Before moving a cut, check the 10 ms RMS energy envelope (`vlog quiet`) and the re-transcription (`asr/edited.json`). |

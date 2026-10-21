@@ -125,7 +125,7 @@ Every command prints a single JSON summary object to `stdout` and passes upstrea
 | `vlog transcribe <media> --out <json>` | Word-level ASR transcript (`mlx-qwen3-asr`); extracts audio from video via `ffmpeg` first | Implemented; the same engine and settings were used in the first production; needs Apple Silicon |
 | `vlog utterances <transcript.json>` | Split transcript into utterances at pauses above threshold; print time and gap table | Implemented, tested |
 | `vlog quiet <audio> --start <s0> --end <s1> [--threshold-db <db>]` | List quiet intervals (`start`, `end`, `min_db`) in a window from a 10 ms RMS envelope | Implemented, tested |
-| `vlog edit <edit_plan.json>` | Render edited WAV and M4A with raised-cosine crossfades and room-tone pads; write manifest and `ebur128` loudness | Reproduces the first production's edit sample for sample |
+| `vlog edit <edit_plan.json>` | Render edited WAV and M4A with equal-power crossfades and room-tone pads; write manifest and `ebur128` loudness | Reproduces the first production's edit sample for sample |
 | `vlog verify --manifest <m> --raw <r> --edited <e> --out <json> [--markdown <md>] [--expect-absent <str> ...]` | Compare raw vs. edited text around joins and scan for cut phrases; write JSON and Markdown reports | Run on the first production: flagged the three defects of the first edit, clean on the fixed edit |
 | `vlog subtitles <transcript.json> --glossary <glossary.json> --out <srt>` | Generate SRT chunked at punctuation (max ~22 CJK chars/cue) with glossary term replacements | Implemented (v0.1) |
 | `vlog heygen me` | Check `HEYGEN_API_KEY` validity and account balance (`v3` API) | Implemented, untested |

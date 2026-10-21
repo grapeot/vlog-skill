@@ -88,12 +88,12 @@ Package root: `vlog_skill/`. Target runtime: Python 3.12 with `numpy` and system
 
 | Module | Responsibility |
 | :--- | :--- |
-| `vlog_skill/project.py` | Implements `vlog init <project_dir>`. Creates the standard project directory hierarchy (`research`, `writing`, `audio/raw`, `asr`, `edit`, `avatar`, `subtitles`, `storyboard`, `broll`, `render`). Refuses to initialize inside the `vlog-skill` git working tree unless explicitly overridden in tests. |
-| `vlog_skill/audio.py` | Thin subprocess wrapper around `ffmpeg` and `ffprobe`. Probes media streams (`ffprobe -of json`), decodes arbitrary input media to mono float32 `numpy` arrays at a target sample rate (`48000` Hz default), writes 16-bit/24-bit PCM WAV files, transcodes WAV to AAC M4A, and measures integrated loudness (`I`), loudness range (`LRA`), and true peak (`TP`) by parsing `ffmpeg -af ebur128=peak=true` output. |
+| `vlog_skill/project.py` | Implements `vlog init <project_dir>`. Creates the project layout (`research`, `writing`, `audio/raw`, `audio/music`, `asr`, `edit`, `avatar`, `storyboard`, `subtitles`, `broll`, `render`, `qa`) and `project.json`. Refuses (exit 4) to create a project inside the vlog-skill checkout, so recordings and transcripts cannot land in the public repository. |
+| `vlog_skill/audio.py` | Thin subprocess wrapper around `ffmpeg` and `ffprobe`. Probes duration with `ffprobe`, decodes any media to float32 numpy arrays (mono or stereo) at a given rate, writes 16-bit PCM WAV, encodes AAC M4A, computes RMS envelopes, and parses integrated loudness, loudness range and true peak from `ffmpeg -af ebur128=peak=true`. A missing input raises `FileNotFoundError` (exit 4); an ffmpeg failure raises `ToolError` (exit 5) carrying ffmpeg's stderr. |
 | `vlog_skill/transcribe.py` | Implements `vlog transcribe <media> --out <json>`. If `<media>` is a video container, extracts a temporary WAV via `audio.py`. Dynamically imports `mlx_qwen3_asr` (raising exit code `3` if the optional `[asr]` extra is not installed), runs `Qwen3-ASR-1.7B` with `Qwen3-ForcedAligner-0.6B`, attaches punctuation marks to preceding word tokens, and writes `vlog.transcript/1`. |
-| `vlog_skill/utterances.py` | Implements `vlog utterances <transcript.json>`. Groups consecutive words from `vlog.transcript/1` into utterances split where inter-word gaps exceed `--pause-s` (default `0.40` s) or at sentence-ending punctuation. Returns structured utterance records and formats a compact timing table. |
-| `vlog_skill/quiet.py` | Implements `vlog quiet <audio> --start <s_float> --end <s_float> [--threshold-db <float>]`. Slices the waveform over `[start, end]`, computes a 10 ms non-overlapping RMS envelope in dBFS (`20 * log10(rms + 1e-12)`), and merges contiguous windows below `--threshold-db` (default `-45.0` dBFS) into quiet intervals `{start, end, duration, min_db}`. |
-| `vlog_skill/edit.py` | Implements `vlog edit <edit_plan.json>`. Filters cut words, groups kept words into islands, refines island boundaries using local RMS energy clamped to cut and neighbor boundaries, inserts room-tone pauses according to the pacing table, joins segments with 25 ms raised-cosine crossfades, writes WAV and M4A outputs, measures loudness, and emits `vlog.manifest/1`. |
+| `vlog_skill/utterances.py` | Implements `vlog utterances <transcript.json>`. Groups consecutive words from `vlog.transcript/1` into utterances split where the gap between words exceeds `--min-gap` (default 0.35 s); gaps of `--long-gap` (default 0.8 s) or more are bracketed in the table. Returns structured utterance records and formats a compact timing table. |
+| `vlog_skill/quiet.py` | Implements `vlog quiet <audio> --start <s_float> --end <s_float> [--threshold-db <float>]`. Slices the waveform over `[start, end]`, computes a 10 ms non-overlapping RMS envelope in dBFS (`20 * log10(rms + 1e-9)`), and merges contiguous windows below `--threshold-db` (default -40 dBFS) lasting at least `--min-duration` (default 0.03 s) into quiet runs `{start, end, duration, min_db, center}`. `--envelope` also prints the envelope. |
+| `vlog_skill/edit.py` | Implements `vlog edit <edit_plan.json>`. Filters cut words, groups kept words into islands, refines island boundaries using local RMS energy clamped to cut and neighbor boundaries, inserts room-tone pauses according to the pacing table, joins segments with 25 ms equal-power crossfades, writes WAV and M4A outputs, measures loudness, reports cut edges that sit inside speech energy, and emits `vlog.manifest/1`. |
 | `vlog_skill/verify.py` | Implements `vlog verify`. Reads `manifest.json` (which carries the cuts and islands), `raw.json`, and `edited.json`. Extracts text windows around every join that crosses a cut, flags fillers or doubled characters near joins as `"review"`, searches the entire edited transcript for `--expect-absent` phrases, and writes `vlog.verify/1` JSON and Markdown reports. |
 | `vlog_skill/subtitles.py` | Implements `vlog subtitles <transcript.json> [--glossary <glossary.json>] --out <srt>`. Applies glossary replacements to each cue's text, splits cues at punctuation up to ~22 CJK characters per cue without crossing sentence boundaries, and writes UTF-8 `.srt`. |
 | `vlog_skill/heygen.py` | Implements `vlog heygen` subcommands (`me`, `looks`, `upload`, `create`, `status`, `wait`, `download`) against `https://api.heygen.com` v3 using `urllib.request`. Reads `HEYGEN_API_KEY` from the environment or a local `.env` file. |
@@ -202,8 +202,11 @@ Written by `vlog edit` (abridged; `islands` and `words` cover the whole output):
   "pacing": {"keep_gap_s": {"period": 1.0, "comma": 0.75, "none": 0.6}},
   "cuts": [{"start": 3.0, "end": 4.6, "kind": "major", "reason": "retake: speaker said 'let me redo that'"}],
   "islands": [
-    {"index": 0, "out_start": 0.375, "out_end": 1.745, "raw_start": 0.955, "raw_end": 2.325, "pause_after": 0.45, "text": "我们看那"}
+    {"index": 0, "out_start": 0.375, "out_end": 1.745, "raw_start": 0.955, "raw_end": 2.325, "pause_after": 0.45,
+     "word_raw_start": 1.0, "word_raw_end": 2.25, "text": "我们看那"}
   ],
+  "dropped_islands": [],
+  "warnings": [],
   "words": [
     {"text": "我", "punc": "", "start": 0.42, "end": 0.62, "raw_start": 1.0, "raw_end": 1.2}
   ]
@@ -251,7 +254,7 @@ Written by `vlog verify` (synthetic example: an edit that left a doubled syllabl
 1. Decode the source to 48 kHz stereo float32 with ffmpeg; take the room-tone slice.
 2. Drop every word whose midpoint lies inside a cut. Give zero-length aligner words 50 ms.
 3. Group the kept words into islands. Start a new island when a cut lies between two words (`cut.start >= prev.start - 0.05` and `cut.end <= next.end + 0.05`), or when the raw gap exceeds `keep_gap_s` for the punctuation class of the previous word (`period` if it contains 。？！.?!, `comma` if it contains ，；：、,;:, else `none`). Gaps inside an island are kept exactly as recorded.
-4. Refine each island's edges on the waveform: pad by `pre_pad_s`/`post_pad_s`, then keep extending in half-window steps while the mean square energy over `energy_window_s` stays at or above `energy_threshold_mean_sq`, up to `max_onset_extension_s` before the first word and `max_release_extension_s` after the last. All of this is clamped to the neighbouring islands' word times (with 20 ms margin) and to the edges of adjacent cuts, so padding never re-imports deleted audio.
+4. Refine each island's edges on the waveform: pad by `pre_pad_s`/`post_pad_s`, then keep extending in half-window steps while the mean square energy over `energy_window_s` stays at or above `energy_threshold_mean_sq`, up to `max_onset_extension_s` before the first word and `max_release_extension_s` after the last. All of this is clamped to the neighbouring islands' word times (with 20 ms margin) and to every cut that ends before the midpoint of the island's first word or starts after the midpoint of its last word. Comparing against midpoints matters: when the aligner stretches a kept word over a filler or a repeated syllable, the cut starts inside that word's token span, and the island must stop at the cut. An island that the cuts reduce to less than 20 ms is dropped and listed in `dropped_islands`.
 5. Assemble: `lead_in_s` of room tone, then each island, then a room-tone pad, joined with `crossfade_ms` equal-power crossfades (cos/sin quarter-period). The pause after island `k` is:
    - `section_pause_s` if the next island starts within `section_match_window_s` of a `section_starts` entry;
    - else `after_major_cut_s[class]` if a major cut lies between the last word of `k` and the first word of `k+1` (with 0.15 s tolerance);
@@ -259,17 +262,18 @@ Written by `vlog verify` (synthetic example: an edit that left a doubled syllabl
    - else (a stall longer than `keep_gap_s`) `long_gap_s[class]`, using the larger target when the raw gap exceeds the threshold.
    The pad length is `pause - edge_quiet_margin_s` plus the two crossfades, because the refined edges already carry some quiet. Pads are cut from the room tone at an offset that varies with the island index; the final island is followed by `tail_s` of room tone.
 6. Write 16-bit PCM WAV, optionally AAC M4A at 256 kb/s, measure loudness with ffmpeg `ebur128=peak=true`, and write the manifest.
+7. Report every cut edge whose 15 ms level is at or above `edges.warn_edge_db` (default -35 dBFS) in `warnings` (type `cut_edge_in_speech`). Removing a stutter often puts the end edge at the next syllable's onset, which is expected; other warnings usually mean the edge should move into a quiet run.
 
-The renderer reproduces, sample for sample, the hand-written script used in the production it was extracted from (verified on a 23 minute recording with 55 cuts).
+On the production it was extracted from (a 23 minute recording, 55 cuts) the renderer matches the original hand-written script sample for sample except at two joins, where the old script's edge padding reached into a cut: one imported 0.1 s of room tone, the other the tail of a filler that re-transcription had not caught.
 
 ### 4.2 Verifying an edit (`verify.py`)
 
 Inputs: the manifest, the raw transcript, and a fresh transcript of the edited audio.
 
-1. A join is a pair of consecutive islands with at least one cut between them (`cut.start < next.raw_start` and `cut.end > prev.raw_end`).
-2. For each join at output time `j`: collect edited words starting in `[j - 2.2, j + 2.2)`, raw words before and after the gap, and edited words within `±1.0 s`.
-3. Within `±1.0 s`, flag fillers (default 呃, 嗯, um, uh, erm; CJK fillers by substring, Latin ones by whole word) and doubled CJK characters (`XX`) unless allow-listed (`--allow-double 看看`). Flagged joins get `status: "review"`.
-4. Search the whole edited text for every `--expect-absent` phrase.
+1. A join is a pair of consecutive islands with at least one cut between their words (`cut.start < next.word_raw_start` and `cut.end > prev.word_raw_end`; manifests without those fields fall back to the refined edges).
+2. For each join, with `j` the end of the earlier island and `k` the start of the later one in the output: collect edited words starting in `[j - 2.2, k + 2.2)` and in `[j - 1.0, k + 1.0)`, plus raw words before and after the gap. Latin tokens are joined with spaces.
+3. In the narrower window, flag fillers (default 呃, 嗯, um, uh, erm; CJK fillers by substring, Latin ones by whole word) and doubled CJK characters (`XX`) unless allow-listed (`--allow-double 看看`). Flagged joins get `status: "review"`.
+4. Search the whole edited text for every `--expect-absent` phrase, ignoring case, punctuation and spacing.
 5. `clean` = no review joins and no expected-absent hits.
 
 Limits that matter in practice: a partial syllable left at a join may not be transcribed at all, so `clean` is necessary but not sufficient, and the human listen stays mandatory. Legitimate reduplications (看看, 常常) are flagged until allow-listed.
@@ -277,8 +281,8 @@ Limits that matter in practice: a partial syllable left at a join may not be tra
 ### 4.3 Subtitles (`subtitles.py`)
 
 - Glossary: a JSON object mapping recognized text to the intended text, for example `{"P二": "PR", "扣的瑞维有": "code review"}`. Replacements are plain substring replacements on each cue's text, longest key first.
-- Chunking: words are appended to a cue until adding the next word would exceed `max_width` (CJK characters count 1, other visible characters 0.5); a cue is closed at every sentence end and at a clause end once it is at least 60% full. Trailing ，。、；： are dropped from the displayed text.
-- Timing: a cue spans its first word's start to its last word's end, extended to at least 0.8 s but never past the next cue. SRT times are written from integer milliseconds.
+- Chunking: words are appended to a cue until adding the next word would exceed `max_width` (measured after glossary replacement; CJK characters count 1, other visible characters 0.5, spaces 0.25); Latin words are separated by a space even after punctuation; a cue is closed at every sentence end and at a clause end once it is at least 60% full. Trailing ，。、；： and ASCII ,;: are dropped from the displayed text. A glossary key split across two cues is not replaced.
+- Timing: a cue spans its first word's start to its last word's end, extended to at least 0.8 s, and always ends at or before the next cue's start. SRT times are written from integer milliseconds.
 - `vlog subtitles` lists cues shorter than 1.3 s so they can be fixed by adjusting punctuation.
 
 ---
@@ -296,18 +300,18 @@ Limits that matter in practice: a partial syllable left at a join may not be tra
 ### 5.2 Endpoints and Subcommands
 
 1. `vlog heygen me`:
-   Queries account/quota status to verify the API key and remaining balance.
+   `GET /v3/users/me`: verifies the key and returns `billing_type` and balance.
 2. `vlog heygen looks`:
-   `GET /v3/avatars/looks?avatar_type=digital_twin&ownership=private`
+   `GET /v3/avatars/looks?avatar_type=digital_twin&ownership=private&limit=50` (`--avatar-type`, `--ownership`, `--limit`)
    Returns each look's `id` (used as `avatar_id`), `name`, `status`, and `supported_api_engines`.
 3. `vlog heygen upload <audio>`:
-   - If file size `<= 32 * 1024 * 1024` bytes (32 MB): simple multipart upload `POST /v3/assets` with field `file` (`audio/mpeg` or `audio/wav`).
+   - If file size `<= 32 * 1024 * 1024` bytes (32 MB): simple multipart upload `POST /v3/assets` with field `file` (`audio/mpeg` for `.mp3`, `audio/wav` for `.wav`; other formats such as `.m4a` are rejected with a conversion hint, because HeyGen accepts only MP3 and WAV audio).
    - If file size `> 32` MB: 3-step direct upload:
      1. `POST /v3/assets/direct-uploads` with JSON `{"filename": name, "content_type": mime, "size_bytes": size}` -> returns `{asset_id, upload_url, upload_headers}`.
-     2. `PUT <upload_url>` with the raw file bytes and `upload_headers` passed verbatim.
+     2. `PUT <upload_url>` with the raw file bytes and `upload_headers` as returned; if they carry no `Content-Type`, the file's audio type is added so urllib does not send `application/x-www-form-urlencoded`.
      3. `POST /v3/assets/{asset_id}/complete` with body `{}`.
    - Returns `asset_id` (asset IDs do not expire).
-4. `vlog heygen create --avatar-id <id> --audio-asset-id <id> [--engine <type>] [--resolution <res>] [--aspect-ratio <ratio>] [--format mp4|webm] [--title <str>] [--idempotency-key <key>]`:
+4. `vlog heygen create --avatar-id <id> --audio-asset-id <id> [--engine <type>] [--resolution <res>] [--aspect-ratio <ratio>] [--format mp4|webm] [--title <str>] [--callback-url <url>] [--idempotency-key <key>]` (or `--audio-url <public url>` instead of `--audio-asset-id`, at most 32 MB):
    `POST /v3/videos` with body:
    ```json
    {
@@ -333,7 +337,7 @@ Limits that matter in practice: a partial syllable left at a join may not be tra
 
 ## 6. CLI Output Envelope and Error Handling
 
-Every `vlog` command prints exactly one JSON document to `stdout`. Diagnostic progress, if any, goes to `stderr`.
+Every `vlog` command prints exactly one JSON document to `stdout`, including usage errors. Only `--help` and `--version` print plain text.
 
 ### Success envelope (exit code 0)
 
@@ -382,8 +386,8 @@ For ffmpeg failures (`ToolError`) the message carries ffmpeg's stderr. For other
 | 0 | Success | Command completed. `vlog verify` also exits 0 when it finds problems; read `clean` and `joins_flagged`. |
 | 2 | Usage error | Unknown subcommand, missing required flag |
 | 3 | Missing dependency or credential | ffmpeg or ffprobe not on PATH; `mlx-qwen3-asr` not installed; `HEYGEN_API_KEY` not set |
-| 4 | Bad input | Missing or malformed file, invalid plan (a cut with start >= end, unknown kind), nothing left to render |
-| 5 | Upstream failure | HeyGen HTTP 4xx/5xx or network error, a render that ended in `failed` (`vlog heygen wait`), ffmpeg returned an error |
+| 4 | Bad input | Missing file, malformed JSON, invalid plan (a cut with start >= end, unknown kind, a room-tone window outside the recording or shorter than 0.2 s), nothing left to render, `vlog init` inside the repository |
+| 5 | Upstream failure | HeyGen HTTP 4xx/5xx or network error (including uploads and downloads), a render that ended in `failed` or did not finish before `--timeout` (`vlog heygen wait`), ffmpeg returned an error (including media it cannot decode) |
 
 Overlapping cuts are allowed; a word is dropped if its midpoint falls in any of them.
 
