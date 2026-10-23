@@ -1,6 +1,6 @@
 ---
 name: vlog
-description: Produce a narrated talking-head explainer video end to end from a topic or raw idea with a human in the loop. Use this skill when researching a topic, drafting a spoken script, editing a human voice recording via word-level ASR and waveform silence analysis, verifying audio joins, generating a lip-synced avatar video with HeyGen, or building a transcript-keyed storyboard and B-roll plan with the vlog CLI.
+description: Produce a narrated talking-head explainer video end to end from a topic or raw idea with a human in the loop. Use this skill when researching a topic, drafting a spoken script, editing a human voice recording via word-level ASR and waveform silence analysis, verifying audio joins, generating a lip-synced avatar video with HeyGen, building a transcript-keyed storyboard and B-roll plan, or cutting short distribution clips from the finished video with the vlog CLI.
 ---
 
 # vlog Skill
@@ -20,6 +20,7 @@ Produce a rendered explainer video in which the speaker's own digital-twin avata
 | `vlog subtitles` | Exercised in the first production | Punctuation-aware cues with a glossary; long clauses are cut near word boundaries |
 | Stage 14 (compose and render) | Exercised once with a project-local renderer | The CLI does not compose; the first production rendered 17.8 minutes of 1080p25 in about 100 s with 10 worker processes, tried a 1.1x speed change that the owner reverted after watching |
 | Stage 15 (final QA) | Designed, not yet exercised | |
+| Stage 16 (distribution clips, `vlog clip`) | Exercised once | One clip cut from each of the two productions and checked locally (edges, frames, re-transcription, loudness); not yet posted, so nothing is known about how viewers respond |
 
 ### Boundaries and Responsibilities
 
@@ -29,7 +30,7 @@ Produce a rendered explainer video in which the speaker's own digital-twin avata
   1. **The agent cannot hear audio.** It measures loudness, energy envelopes, and transcripts. At every audio checkpoint, the agent must state plainly that a human must listen to judge delivery, pacing, and tone.
   2. **The agent never publishes anything.** Uploading or publishing to external video platforms is strictly out of scope.
   3. **No private data in version control.** Never commit audio recordings, transcripts, avatar videos, rendered outputs, API keys, personal names, or machine-specific paths.
-- **Out of scope**: Platform publishing, text-to-video generation, text-to-speech (TTS) voice cloning (the voice is always the human's own recording), and GUI non-linear editors (NLEs).
+- **Out of scope**: Platform publishing (Stage 16 stops at files on disk), text-to-video generation, text-to-speech (TTS) voice cloning (the voice is always the human's own recording), and GUI non-linear editors (NLEs).
 
 ---
 
@@ -195,6 +196,37 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
   2. `vlog transcribe render/final.mp4 --out asr/final.json` matches the expected spoken content without truncation at start or end.
   3. `ffprobe` confirms matching durations across video, audio, and subtitle streams.
 
+### Stage 16: Distribution Clips (Optional; Files Only, No Publishing)
+- **Goal**: Cut one or more short clips from the finished video whose only job is to make a stranger scrolling a feed stop, understand one idea, and want the full video. A clip is a door to the video, not a summary of it.
+- **Artifacts**: `render/clips/<name>.mp4`, plus `<name>_first.png`, `<name>_last.png`, `<name>_sheet.png`, and a short `render/clips/<name>.md` (source segment, why this segment, duration, loudness, size). Handing the files to the human ends the stage; posting is done by the human or by a platform-specific tool, never by this skill.
+- **Acceptance Criteria**:
+  1. **Self-contained arc**: Played alone, the clip has a setup, a tension and a payoff (or a sharp open question). A viewer who has seen nothing else can say what the claim is. Nothing in it depends on an earlier part of the film that the clip leaves out; if the speaker refers back to something ("the three complaints"), the clip shows it on screen or keeps the sentence that explains it.
+  2. **Starts on a hook, ends on a complete thought**: The first spoken sentence is a claim, a problem or a story, not a greeting, a "so" or a "next". The last spoken sentence is complete and is either a conclusion or an open question that the full video answers. No edge falls inside a word or inside a subtitle cue: `vlog clip --srt` reports `edge_inside_cue` and `edge_in_speech` and both lists are empty (or each remaining item is explained).
+  3. **First and last frames**: The first frame works as the feed thumbnail (fully drawn, not mid-fade, not a half-built diagram). The last frame shows a finished picture (the complete diagram or a clear question) with no half-displayed subtitle. A title card is kept only if it is the strongest hook available, and for at most about 2 s.
+  4. **Picture edges**: No edge lands inside an animation (an element mid-entrance, a zoom in progress). Joins between non-adjacent segments use a short crossfade (`--crossfade`, default 0.3 s) so neither the music bed nor the picture jumps.
+  5. **Sound**: Short fades (about 0.15 s in, 0.5 s out). Integrated loudness from -16 to -14 LUFS with true peak at or below -1 dBTP, normalised linearly (`loudness_target.normalization_type` is `linear`).
+  6. **Format**: H.264 High profile, `yuv420p`, AAC 48 kHz stereo, the source resolution (1080p for these films), `moov` before `mdat` (`faststart: true`), only one video and one audio stream (soft subtitle tracks are dropped; their cues would be on the film's clock).
+  7. **Length within the target platform's limit**, checked against the measured `duration_s`:
+
+     | Target | Limit to respect | Notes |
+     | :--- | :--- | :--- |
+     | X without Premium | 140 s | The safe default for any clip meant for X; `vlog clip` warns above `--max-duration` (default 140) |
+     | X through a scheduling tool such as Typefully | 10 min, 512 MB (Typefully, checked 2026-10) | Premium's longer uploads work only in X's own uploader |
+     | Vertical short-video feeds (YouTube Shorts, the vertical feed on Bilibili) | 9:16 picture; Shorts accepts up to 3 min (YouTube, 2024-10) | See the crop rule below |
+
+  8. **Verified, not assumed**: the review stills (first, last, a 12-frame contact sheet) have been looked at; the clip has been re-transcribed (`vlog transcribe`) and its first and last words are the intended ones, with no clipped syllable at either end; `ffprobe` duration, codecs and size are reported from the file.
+- **Advice (choosing the segment)**: Read the chapter list and the subtitles as text first and list candidate passages of 60 to 140 s that hold one complete idea; prefer a surprising concrete story or a reframing claim over a list of tips. Check each candidate against what the human has already posted on the target platform; a clip that repeats the opening of an earlier post spends the viewer's attention twice. A passage that opens on a reference to an earlier video can still work if the next sentences re-tell what happened. Write down the runner-up and why it lost, so the human can swap.
+- **Advice (edges)**: Work on the finished film's clock. If a title pre-roll or a speed change was applied at the end (Stage 14), the times in `asr/avatar.json` and the storyboard no longer match the film; use the subtitles that were burned into the film, or re-transcribe the film. Place each edge in the silence between two subtitle cues (`vlog clip` prints the gap an edge sits in), then confirm with the edge margin it reports: the loudest 10 ms window within 0.1 s of the edge, measured against the segment's speech level (the 90th percentile of its envelope). Under a music bed the floor stays at -25 to -32 dBFS, so an absolute threshold such as `vlog quiet --threshold-db -35` finds no gap at all; the relative margin does (between sentences the measured margin was 13 to 20 dB). Leave about 0.3 to 0.6 s of air after the last word; a short hold on the last frame (`--hold-end 1`) lets a viewer read the final picture while the sound fades.
+- **Advice (vertical crops)**: Do not crop a canvas-layout film to 9:16. A layout whose meaning is spread across the frame (a map rail on the left, a stage on the right, the speaker in a corner) loses half its content when cropped, and the remaining half no longer makes sense. Post the 16:9 clip natively (X plays it as is), or re-render the canvas for a vertical layout from the same timeline. A plain talking-head shot with no canvas can be cropped.
+- **Advice (end card)**: An end card with a "full video" call to action is optional and is the human's call (wording, brand, where the link lives). Without one, end on the finished picture and let the post text carry the link.
+- **Advice (loudness)**: A finished film mixed to -16 LUFS with peaks near -1.5 dBTP cannot be raised to -14 linearly; ffmpeg's `loudnorm` then switches to dynamic mode on its own. Keep the film's -16 (the default) unless the human asks for louder, and read `normalization_type` from the output.
+
+```bash
+vlog clip render/final.mp4 --out render/clips/teaser.mp4 \
+  --segment 1.2:3.05 --segment 87.05:155.2 \
+  --srt subtitles/subtitles_final.srt --hold-end 1.0
+```
+
 ---
 
 ## Project Layout
@@ -253,6 +285,7 @@ Every `vlog` command prints a single JSON summary object to `stdout` and passes 
 | Audio offset between two files at several points | `vlog offset <reference> <other> --at <s> [<s> ...]` | Implemented (v0.1), checked on the first production's renders |
 | Resolve spoken phrases to times | `vlog anchors <transcript.json> --phrase NAME=PHRASE [...] [--after <s>] [--until <s>]` | Implemented (v0.1) |
 | Generate SRT with glossary | `vlog subtitles <transcript.json> --glossary <glossary.json> --out <srt>` | Implemented (v0.1) |
+| Cut a distribution clip with edge checks and review stills | `vlog clip <video> --out <mp4> --segment START:END [...] [--srt <srt>] [--crossfade 0.3] [--hold-end <s>] [--lufs -16] [--true-peak -1] [--max-duration 140] [--sheet-frames 12]` | Implemented; used for the two clips of Stage 16 |
 
 ---
 
@@ -527,3 +560,6 @@ An agent can verify look development and rendering against these checks (the pla
 | 28 | Each round of script fixes failed the cold read for a new reason | Explanations were added inside a fixed character budget, so sentences compressed into note form; codenames and back-to-back multiples with different baselines stayed in | Do an editorial pass first (drop non-load-bearing numbers, plain labels for codenames, one item per paragraph, like-for-like comparisons), then rewrite with a slightly wider budget. |
 | 29 | Off-script speech contradicted the sources (a slip of "sub-agent" for "main agent"; a comparison that the cited data reverses) | The speaker improvised while reading | Fact-check `asr/raw.json` against the source contract before cutting; cut the whole sentence when the slip sits mid-sentence and the neighbours join cleanly, and list anything left in for the human. |
 | 30 | A long Video Agent render showed a sudden zoom-in at one point and small head jumps at three others | Video Agent split the 15-minute recording into 8 scenes; at some scene joins the framing or pose did not carry over (the earlier scene ends on a neutral closed-mouth pose, the next starts elsewhere). The first production's full render had one such join as well | Find joins from the steps in `vlog offset` and the largest frame differences (a 9x-median threshold caught only the zoom; inspect the top ten differences); in the composite, mask each join with a deliberate change of the speaker box (punch-in or pull-out) or a 3–4 frame crossfade. |
+| 31 | A teaser's first frame (the feed thumbnail) was blank paper | The source's title card faded in over its first second; the clip started at 0 s | Look at the frames around every edge before choosing it; start a title-card slice after its fade-in has finished (in that film, 1.2 s rather than 0 s). |
+| 32 | `vlog quiet` found no gap between sentences in a finished film | The music bed keeps the floor at -25 to -32 dBFS, above any useful absolute threshold | Place clip edges in subtitle-cue gaps and check the relative edge margin that `vlog clip` reports (speech p90 minus the loudest level within 0.1 s of the edge). |
+| 33 | A clip asked for -15 LUFS came back with `normalization_type: dynamic` | The film was already at -16 LUFS with a true peak of -1.5 dBTP, so a linear +1 dB would breach the peak limit and `loudnorm` silently switched modes | Keep the film's -16 LUFS (the `vlog clip` default, with a -1 dBTP ceiling) or ask before limiting; report the mode. |

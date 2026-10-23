@@ -34,6 +34,7 @@ Repository: `https://github.com/grapeot/vlog-skill` (MIT license, default branch
 | Subtitle generation with glossary (`vlog subtitles`) | Implemented (v0.1) | Punctuation-chunked SRT with term replacement |
 | HeyGen, used directly (web UI or official CLI with OAuth) | Exercised in the first production | Full-length render in the web UI; a 60 s test through the official CLI with OAuth; subscription credits |
 | B-roll rendering & music generation | External sibling project | Provided by `https://github.com/grapeot/opus-video-audio-skill` |
+| Distribution clips (`vlog clip`) | Implemented | One clip from each of two productions; files only, no publishing |
 | Timeline composition & render (`vlog compose`) | Planned (v0.2) | `ffmpeg` layout modes, subtitle burn-in/mux, ducked music mix |
 
 The pipeline was built and validated on one production: an approximately 17.7-minute Chinese technical explainer on code review when AI writes code faster than humans can read it (edited down from a 23-minute raw recording against a 15-minute target).

@@ -66,6 +66,7 @@ vlog-skill/
 │       ├── verify.py         # Join diff audit between raw and edited transcripts + absent-phrase scan
 │       ├── align.py          # vlog offset (audio cross-correlation) and vlog anchors (phrase -> time)
 │       ├── subtitles.py      # Punctuation-aware SRT chunker (~22 CJK char limit) + glossary replacer
+│       ├── clip.py           # vlog clip: distribution clips with edge checks, linear loudnorm, review stills
 │       ├── project.py        # Workspace directory initializer (vlog init)
 │       └── cli.py            # argparse CLI entrypoint emitting one JSON summary per command
 └── tests/                    # Offline pytest suite using synthetic audio and mocked HTTP
@@ -81,5 +82,6 @@ vlog-skill/
 - `verify.py`: Maps every cut in `edit_plan.json` through `manifest.json` to `edited.json`, compares raw vs. edited text around each join, checks for `--expect-absent` phrases and doubled characters, and writes `verify_report.json` and `verify_report.md`.
 - `align.py`: `vlog offset` measures the audio offset between two media files at several points by cross-correlation; `vlog anchors` resolves spoken phrases to times in a transcript and fails on a missing phrase.
 - `subtitles.py`: Applies `glossary.json` replacements to word/segment transcripts and emits `.srt` cues split at punctuation boundaries, capped at ~22 CJK characters per cue without crossing sentence ends.
+- `clip.py`: Implements `vlog clip`. Cuts one or more segments from a finished video (one ffmpeg input per segment), joins them with `xfade`/`acrossfade`, optionally holds the last frame, fades the sound, normalises loudness in two `loudnorm` passes (linear when the true peak allows), encodes H.264 High/yuv420p/AAC with `+faststart`, and reports for every edge whether it lies inside an SRT cue and its level relative to the segment's speech. Writes first-frame, last-frame and contact-sheet PNGs.
 - `project.py`: Implements `vlog init <project_dir>`, creating `research/`, `writing/`, `audio/raw/`, `audio/music/`, `asr/`, `edit/`, `avatar/`, `storyboard/`, `subtitles/`, `broll/`, `render/`, and `qa/`.
 - `cli.py`: Dispatches `vlog` subcommands, enforces single-JSON-object output on `stdout`, and passes exception and subprocess error details through unmodified.

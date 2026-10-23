@@ -136,6 +136,15 @@ def cmd_anchors(a) -> dict:
     return {"out": a.out, "anchors": times}
 
 
+def cmd_clip(a) -> dict:
+    from .clip import cut_clip, parse_segments
+
+    return cut_clip(a.video, a.out, parse_segments(a.segment), srt=a.srt, crossfade=a.crossfade, hold=a.hold_end,
+                    fade_in=a.fade_in, fade_out=a.fade_out, video_fade_out=a.video_fade_out, lufs=a.lufs,
+                    true_peak=a.true_peak, max_duration=a.max_duration or None, crf=a.crf,
+                    audio_bitrate=a.audio_bitrate, stills_dir=a.stills_dir, sheet_frames=a.sheet_frames)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = JsonArgumentParser(prog="vlog", description=__doc__.splitlines()[0])
     p.add_argument("--version", action="version", version=__version__)
@@ -209,6 +218,25 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--until", type=float)
     s.add_argument("--out")
     s.set_defaults(func=cmd_anchors)
+
+    s = sub.add_parser("clip", help="cut a distribution clip from a finished video, with edge checks and stills")
+    s.add_argument("video")
+    s.add_argument("--out", required=True)
+    s.add_argument("--segment", action="append", required=True, help="START:END in source seconds (repeatable, joined in order)")
+    s.add_argument("--srt", help="subtitles on the source clock; edges inside a cue are reported")
+    s.add_argument("--crossfade", type=float, default=0.3, help="picture and sound crossfade between segments")
+    s.add_argument("--hold-end", type=float, default=0.0, help="hold the last frame this long (audio fades over it)")
+    s.add_argument("--fade-in", type=float, default=0.15)
+    s.add_argument("--fade-out", type=float, default=0.5)
+    s.add_argument("--video-fade-out", type=float, default=0.0)
+    s.add_argument("--lufs", type=float, default=-16.0)
+    s.add_argument("--true-peak", type=float, default=-1.0)
+    s.add_argument("--max-duration", type=float, default=140.0, help="warn above this length; 0 disables")
+    s.add_argument("--crf", type=int, default=18)
+    s.add_argument("--audio-bitrate", default="192k")
+    s.add_argument("--stills-dir", help="where first/last/contact-sheet PNGs go (default: next to --out)")
+    s.add_argument("--sheet-frames", type=int, default=12, help="contact sheet frames; 0 skips all stills")
+    s.set_defaults(func=cmd_clip)
     return p
 
 

@@ -97,6 +97,7 @@ Package root: `vlog_skill/`. Target runtime: Python 3.12 with `numpy` and system
 | `vlog_skill/verify.py` | Implements `vlog verify`. Reads `manifest.json` (which carries the cuts and islands), `raw.json`, and `edited.json`. Extracts text windows around every join that crosses a cut, flags fillers or doubled characters near joins as `"review"`, searches the entire edited transcript for `--expect-absent` phrases, and writes `vlog.verify/1` JSON and Markdown reports. |
 | `vlog_skill/align.py` | Implements `vlog offset` (audio cross-correlation at several points, positive offset = the other file is late) and `vlog anchors` (phrase to the start time of its first word, spaces ignored, missing phrases raise). |
 | `vlog_skill/subtitles.py` | Implements `vlog subtitles <transcript.json> [--glossary <glossary.json>] --out <srt>`. Applies glossary replacements to each cue's text, splits cues at punctuation up to ~22 CJK characters per cue without crossing sentence boundaries, and writes UTF-8 `.srt`. |
+| `vlog_skill/clip.py` | Implements `vlog clip <video> --out <mp4> --segment START:END [...]`. See section 4.5. |
 | `vlog_skill/cli.py` | `argparse` dispatcher for `vlog`. Catches typed exceptions, formats the standard JSON output envelope on stdout, and exits with deterministic codes (`0`, `2`, `3`, `4`, `5`). |
 
 ---
@@ -289,6 +290,15 @@ Limits that matter in practice: a partial syllable left at a join may not be tra
 
 - `vlog offset reference other --at t1 t2 ...`: decodes a `--window` (default 30 s) of mono 8 kHz audio from both files at each point and takes the cross-correlation peak. Each point reports `offset_ms` (positive when `other` is late) and the normalised correlation; `aligned` is true when every offset is within `--tolerance-ms` (default 20) and every correlation exceeds 0.9. On the first production a direct avatar render measured 0 ms; a Video Agent render measured 0, -92 and -160 ms at 5, 500 and 1000 s.
 - `vlog anchors transcript --phrase NAME=PHRASE ... [--after s] [--until s]`: concatenates the words without spaces, finds each phrase's first occurrence whose first word starts inside the window, and returns that start time. Any missing phrase raises `KeyError` (exit 4), so a reworded line cannot silently move its picture beat.
+
+### 4.5 Distribution clips (`clip.py`)
+
+- Each `--segment START:END` (source seconds) becomes its own ffmpeg input (`-ss START -t LEN -i video`), so late segments do not decode the whole film. Picture: `setpts=PTS-STARTPTS,fps=<source fps>,settb=AVTB,format=yuv420p`; sound: `asetpts=PTS-STARTPTS,aresample=48000`, stereo.
+- Segments are joined in order with `xfade=transition=fade` and `acrossfade` of `--crossfade` seconds (default 0.3; `concat` when 0). Offsets come from `timeline()`: each join starts `crossfade` before the end of the running length. `--hold-end` adds `tpad=stop_mode=clone` and `apad`; fades are `afade` in at 0 and out over the last `--fade-out` seconds (optional `fade` to black with `--video-fade-out`). Output length = sum of segments - crossfades + hold.
+- Loudness: pass 1 runs the audio graph into `loudnorm=I:TP:LRA=11:print_format=json`; pass 2 renders with the measured values and `linear=true`. When the measured true peak does not leave room for a linear gain, `loudnorm` switches to dynamic mode; the command reports `normalization_type` and adds a `loudnorm_not_linear` warning. Defaults: -16 LUFS, -1 dBTP.
+- Encode: `libx264 -profile:v high -crf 18 -pix_fmt yuv420p`, AAC 192 kb/s 48 kHz stereo, `-movflags +faststart`, `-sn -dn` (soft subtitle and data streams are dropped). `faststart` in the summary is computed by walking the top-level MP4 boxes (`moov` before `mdat`).
+- Edge checks: with `--srt`, every edge is either `inside_cue` (with the cue) or reported with the cue gap it sits in (`edge_inside_cue` warning). Independently, the 10 ms RMS envelope of the source is measured: the segment's speech level is its 90th percentile, and each edge's level is the loudest window within 0.1 s; a margin under 10 dB is an `edge_in_speech` warning. A segment whose p90 is within 6 dB of its median has no speech (a title card over music) and is not checked. Other warnings: `over_max_duration` (default 140 s; 0 disables), `duration_mismatch` (more than 0.15 s from the expected length), `not_faststart`.
+- Stills: `<stem>_first.png`, `<stem>_last.png` (last decoded frame), and `<stem>_sheet.png` (`--sheet-frames` evenly spaced frames from first to last, 480 px wide, tiled 4 across). `--sheet-frames 0` skips all stills.
 
 ---
 

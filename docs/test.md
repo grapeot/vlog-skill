@@ -23,6 +23,7 @@ python -m pytest -q
 | `verify.py` | A filler and a doubled syllable near a join are flagged as `review`; allow-listing and an empty filler list clear them; an expected-absent phrase anywhere in the edited text makes the report unclean. | Rendered synthetic edit plus hand-written edited transcripts. |
 | `subtitles.py` | Glossary replacement, the width limit, no merge across a sentence end, trailing punctuation dropped, SRT timestamps from integer milliseconds. | Synthetic word list. |
 | `align.py`, `subtitles.py` (`tests/test_align_subtitles.py`) | A 120 ms shift between two synthetic recordings is measured to within 2 ms and an identical pair reads as aligned; phrases resolve to the first match after `--after`, spaced and unspaced Latin match, a missing phrase raises; a long clause splits into near-equal cues with no orphan; sentence ends are respected. | Synthetic tone-burst recordings and word lists. |
+| `clip.py` (`tests/test_clip.py`) | Segment parsing; SRT parsing and edge-in-cue / cue-gap classification; crossfade and hold arithmetic; top-level MP4 box order (faststart); end to end on a synthetic film: two segments joined, held, encoded as H.264 High / yuv420p / AAC with faststart, length within 0.15 s of the expected value, loudness within 1.5 LU of -16, stills written, no warnings; an edge inside a cue and inside speech plus an over-length clip all produce warnings; a segment past the end exits 4. | `ffmpeg` `testsrc2` picture muxed with the tone-burst recording (0.1 s bursts every 0.25 s, so the envelope has speech-like gaps) and a hand-written SRT. |
 | `cli.py` | Envelopes and exit codes: `init` succeeds; a missing input file exits 4; an unknown subcommand (including the removed `heygen`) exits 2 with a JSON usage error; an ffmpeg failure exits 5. | `cli.main([...])` with captured stdout. |
 
 ---
@@ -87,3 +88,12 @@ Use this checklist when running a full episode with a human in the loop. Every i
 - [ ] `storyboard/storyboard.md` is keyed to exact phrases in `asr/avatar.json` (what the speaker actually said), not `writing/script.md` (Pitfall 7).
 - [ ] Full-frame avatar stretches are kept short and every storyboard beat has clear visual content or typography.
 - [ ] Final rendered video passes contact-sheet inspection, stream duration alignment, final audio re-transcription check, and `-16` LUFS loudness check, and is reviewed by the human before any external use.
+
+### Stage 16: Distribution Clips (optional)
+
+- [ ] `vlog clip` ran against the subtitles burned into the finished film (its own clock), and `warnings` is empty or every item is explained.
+- [ ] The first frame is fully drawn and works as a thumbnail; the last frame is a finished picture with no half-displayed subtitle (Pitfall 31).
+- [ ] The clip, re-transcribed with `vlog transcribe`, starts and ends on the intended words with no clipped syllable.
+- [ ] `normalization_type` is `linear`, loudness is within -16 to -14 LUFS, true peak at or below -1 dBTP (Pitfall 33).
+- [ ] Duration is within the target platform's limit (140 s for X without Premium).
+- [ ] Nothing was uploaded or posted by the agent.
