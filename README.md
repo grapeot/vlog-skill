@@ -22,6 +22,7 @@ Engineers and technical authors who use coding agents to produce narrated explai
 | Subtitle generation (`vlog subtitles`) | Implemented (v0.1) | Punctuation-chunked SRT (~22 CJK chars max per cue, never across sentence ends) with glossary replacements |
 | Avatar video | HeyGen, used directly | Web UI or the official `heygen` CLI with OAuth (subscription credits); vlog-skill does not wrap HeyGen. See the skill's "Avatar video with HeyGen" section |
 | B-roll frame rendering & music generation | Delegated | Provided by sibling repository [`opus-video-audio-skill`](https://github.com/grapeot/opus-video-audio-skill) |
+| Distribution clips (`vlog clip`) | Exercised on two clips | One short clip cut from each of two finished videos: subtitle-cue and speech-margin checks at every edge, crossfaded joins, fade-out before a silent last-frame hold and a branded end card, two-pass linear loudness, H.264 High + faststart with metadata and chapters stripped, first/last/contact-sheet stills. Files only; posting is out of scope |
 | Timeline compose & final ffmpeg render | Planned (v0.2) | Automated multi-mode avatar/B-roll compositing and -16 LUFS audio ducking |
 
 ### Out of Scope
@@ -115,6 +116,14 @@ vlog subtitles /path/to/project/asr/avatar.json \
   --out /path/to/project/subtitles/subtitles.srt
 ```
 
+10. **Optional: cut a distribution clip** from the finished film, with edges checked against the film's own subtitles (Stage 16 in the skill):
+
+```bash
+vlog clip /path/to/project/render/final.mp4 --out /path/to/project/render/clips/teaser.mp4 \
+  --segment 1.2:3.05 --segment 87.05:155.2 --srt /path/to/project/render/final.srt \
+  --hold-end 0.5 --end-card 1.5 --end-card-duration 2.5
+```
+
 ## CLI Summary
 
 Every command prints a single JSON summary object to `stdout` and passes error details through (ffmpeg stderr, exception type and message).
@@ -130,6 +139,7 @@ Every command prints a single JSON summary object to `stdout` and passes error d
 | `vlog offset <reference> <other> --at <s> [...]` | Audio offset between two files at several points (cross-correlation); tells whether an avatar render kept the edited audio's timeline | Checked on the first production |
 | `vlog anchors <transcript.json> --phrase NAME=PHRASE [...]` | Resolve spoken phrases to times; a missing phrase fails | Implemented, tested |
 | `vlog subtitles <transcript.json> --glossary <glossary.json> --out <srt>` | Generate SRT chunked at punctuation (max ~22 CJK chars/cue) with glossary term replacements | Implemented (v0.1) |
+| `vlog clip <video> --out <mp4> --segment START:END [...] [--srt <srt>] [--hold-end <s>] [--end-card <s or image>]` | Cut a short distribution clip from a finished video that closes on a branded end card (a frame of the film's title card or an image); report edges inside subtitle cues or speech, normalise loudness linearly (default -16 LUFS, -1 dBTP), encode H.264 High/yuv420p/AAC with faststart, write first/last-frame and contact-sheet PNGs | Used for one clip from each of two productions |
 
 ## Project Layout
 
@@ -173,6 +183,7 @@ vlog-skill/
 │       ├── edit.py
 │       ├── verify.py
 │       ├── subtitles.py
+│       ├── clip.py
 │       ├── project.py
 │       └── cli.py
 └── tests/

@@ -136,6 +136,16 @@ def cmd_anchors(a) -> dict:
     return {"out": a.out, "anchors": times}
 
 
+def cmd_clip(a) -> dict:
+    from .clip import cut_clip, parse_segments
+
+    return cut_clip(a.video, a.out, parse_segments(a.segment), srt=a.srt, crossfade=a.crossfade, hold=a.hold_end,
+                    end_card=a.end_card, end_card_s=a.end_card_duration, end_card_crossfade=a.end_card_crossfade,
+                    fade_in=a.fade_in, fade_out=a.fade_out, video_fade_out=a.video_fade_out, lufs=a.lufs,
+                    true_peak=a.true_peak, max_duration=a.max_duration or None, crf=a.crf,
+                    audio_bitrate=a.audio_bitrate, stills_dir=a.stills_dir, sheet_frames=a.sheet_frames)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = JsonArgumentParser(prog="vlog", description=__doc__.splitlines()[0])
     p.add_argument("--version", action="version", version=__version__)
@@ -209,6 +219,30 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--until", type=float)
     s.add_argument("--out")
     s.set_defaults(func=cmd_anchors)
+
+    s = sub.add_parser("clip", help="cut a distribution clip from a finished video, with edge checks and stills")
+    s.add_argument("video")
+    s.add_argument("--out", required=True)
+    s.add_argument("--segment", action="append", required=True, help="START:END in source seconds (repeatable, joined in order)")
+    s.add_argument("--srt", help="subtitles on the source clock; edges inside a cue are reported")
+    s.add_argument("--crossfade", type=float, default=0.3, help="picture and sound crossfade between segments")
+    s.add_argument("--hold-end", type=float, default=0.0,
+                   help="hold the last frame this long over silence; the audio fade-out ends before the hold")
+    s.add_argument("--end-card", help="close on a branded card: a time in seconds on the source clock (e.g. the "
+                   "title card, fully faded in) or an image path; shown after a crossfade, over silence")
+    s.add_argument("--end-card-duration", type=float, default=2.5, help="seconds the card is fully visible")
+    s.add_argument("--end-card-crossfade", type=float, default=0.5)
+    s.add_argument("--fade-in", type=float, default=0.15)
+    s.add_argument("--fade-out", type=float, default=0.5)
+    s.add_argument("--video-fade-out", type=float, default=0.0)
+    s.add_argument("--lufs", type=float, default=-16.0)
+    s.add_argument("--true-peak", type=float, default=-1.0)
+    s.add_argument("--max-duration", type=float, default=140.0, help="warn above this length; 0 disables")
+    s.add_argument("--crf", type=int, default=16, help="x264 quality; a mostly static canvas stays well under 1 Mb/s")
+    s.add_argument("--audio-bitrate", default="192k")
+    s.add_argument("--stills-dir", help="where first/last/contact-sheet PNGs go (default: next to --out)")
+    s.add_argument("--sheet-frames", type=int, default=12, help="contact sheet frames; 0 skips all stills")
+    s.set_defaults(func=cmd_clip)
     return p
 
 
