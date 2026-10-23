@@ -22,7 +22,7 @@ Engineers and technical authors who use coding agents to produce narrated explai
 | Subtitle generation (`vlog subtitles`) | Implemented (v0.1) | Punctuation-chunked SRT (~22 CJK chars max per cue, never across sentence ends) with glossary replacements |
 | Avatar video | HeyGen, used directly | Web UI or the official `heygen` CLI with OAuth (subscription credits); vlog-skill does not wrap HeyGen. See the skill's "Avatar video with HeyGen" section |
 | B-roll frame rendering & music generation | Delegated | Provided by sibling repository [`opus-video-audio-skill`](https://github.com/grapeot/opus-video-audio-skill) |
-| Distribution clips (`vlog clip`) | Exercised once | One short clip cut from each of two finished videos: subtitle-cue and speech-margin checks at every edge, crossfaded joins, two-pass linear loudness, H.264 High + faststart, first/last/contact-sheet stills. Files only; posting is out of scope |
+| Distribution clips (`vlog clip`) | Exercised on two clips | One short clip cut from each of two finished videos: subtitle-cue and speech-margin checks at every edge, crossfaded joins, fade-out before a silent last-frame hold, two-pass linear loudness, H.264 High + faststart with metadata and chapters stripped, first/last/contact-sheet stills. Files only; posting is out of scope |
 | Timeline compose & final ffmpeg render | Planned (v0.2) | Automated multi-mode avatar/B-roll compositing and -16 LUFS audio ducking |
 
 ### Out of Scope

@@ -117,3 +117,75 @@ def test_clip_rejects_segment_past_the_end(video, capsys):
     rc = cli.main(["clip", str(video / "film.mp4"), "--out", str(video / "x.mp4"), "--segment", "1:30"])
     env = json.loads(capsys.readouterr().out)
     assert rc == cli.EXIT_INPUT and env["error"]["type"] == "ValueError"
+
+
+@pytest.fixture(scope="module")
+def bed_film(tmp_path_factory):
+    """A continuous tone bed (no speech) with a title tag and two chapters in the container."""
+    tmp = tmp_path_factory.mktemp("bed")
+    (tmp / "meta.txt").write_text(
+        ";FFMETADATA1\ntitle=Private working title\n"
+        "[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=3000\ntitle=Part one\n"
+        "[CHAPTER]\nTIMEBASE=1/1000\nSTART=3000\nEND=6000\ntitle=Part two\n", encoding="utf-8")
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=6",
+         "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=6",
+         "-i", str(tmp / "meta.txt"), "-map", "0:v", "-map", "1:a", "-map_metadata", "2", "-map_chapters", "2",
+         "-af", "volume=0.25", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(tmp / "bed.mp4")],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    return tmp
+
+
+def _rms_db(x):
+    return 20 * np.log10(np.sqrt(np.mean(np.asarray(x, dtype=np.float64) ** 2)) + 1e-9)
+
+
+def test_hold_end_fades_before_the_hold(bed_film, capsys):
+    from vlog_skill.audio import load_audio
+
+    out = bed_film / "held.mp4"
+    rc = cli.main(["clip", str(bed_film / "bed.mp4"), "--out", str(out), "--segment", "0.5:4.5",
+                   "--hold-end", "1.0", "--fade-out", "0.5", "--sheet-frames", "0"])
+    d = json.loads(capsys.readouterr().out)["data"]
+    assert rc == 0
+    body = 4.0
+    x = load_audio(out, 48000, 1)
+    seg = lambda a, b: x[int(a * 48000):int(b * 48000)]  # noqa: E731
+    steady = _rms_db(seg(body - 1.2, body - 0.7))   # before the fade starts
+    tail = _rms_db(seg(body - 0.1, body))           # last 100 ms of the source material
+    hold = _rms_db(seg(body + 0.2, body + 0.9))     # inside the hold
+    assert steady > -30
+    assert tail < steady - 12, (steady, tail)       # faded, not cut off at full level
+    assert hold < -70
+    assert abs(d["duration_s"] - 5.0) < 0.15
+
+
+def test_metadata_and_chapters_are_dropped(bed_film, capsys):
+    out = bed_film / "clean.mp4"
+    rc = cli.main(["clip", str(bed_film / "bed.mp4"), "--out", str(out), "--segment", "1:5", "--sheet-frames", "0"])
+    d = json.loads(capsys.readouterr().out)["data"]
+    assert rc == 0
+    src = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_chapters", "-show_format", "-of", "json",
+                                     str(bed_film / "bed.mp4")], capture_output=True, text=True).stdout)
+    assert len(src["chapters"]) == 2 and src["format"]["tags"]["title"] == "Private working title"
+    doc = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_chapters", "-show_format", "-show_streams",
+                                     "-of", "json", str(out)], capture_output=True, text=True).stdout)
+    assert doc["chapters"] == []
+    assert "title" not in doc["format"].get("tags", {})
+    assert [s["codec_type"] for s in doc["streams"]] == ["video", "audio"]
+    kinds = {w["type"] for w in d["warnings"]}
+    assert "extra_streams" not in kinds
+    assert "edge_check_skipped" in kinds  # a tone bed has no speech, so its edges cannot be judged
+
+
+def test_loudnorm_linear_blockers():
+    from vlog_skill.clip import linear_blockers, lra_target
+
+    assert lra_target(4.5) == 11 and lra_target(12.2) == 14 and lra_target(80) == 50
+    m = {"input_i": "-16.0", "input_tp": "-1.5", "input_lra": "5.0"}
+    assert linear_blockers(m, -16.0, -1.0, 11) == []
+    tp = linear_blockers(m, -15.0, -1.0, 11)
+    assert [r["condition"] for r in tp] == ["true_peak"] and tp[0]["true_peak_after_gain"] == -0.5
+    lra = linear_blockers({**m, "input_lra": "15.0"}, -16.0, -1.0, 11)
+    assert [r["condition"] for r in lra] == ["lra"]

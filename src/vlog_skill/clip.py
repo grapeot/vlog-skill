@@ -1,7 +1,7 @@
 """Cut a short distribution clip from a finished video.
 
-A clip is one or more source segments joined with a short crossfade, optionally held on its last
-frame, faded in and out, loudness-normalised in two passes (linear when the true peak allows), and
+A clip is one or more source segments joined with a short crossfade, faded in and out (the fade-out
+ends where the source material ends), optionally held on its last frame over silence, loudness-normalised in two passes (linear when the true peak allows), and
 encoded as H.264 High / yuv420p / AAC with the moov atom at the front. The command also reports, for
 every segment edge, whether it falls inside a subtitle cue and how far the audio at the edge sits below
 the segment's speech level (a music bed keeps absolute levels high, so the margin is relative), and it
@@ -81,10 +81,13 @@ def edge_margins(media: str, segments: list[tuple[float, float]]) -> list[dict]:
         def idx(t):
             return int(np.clip(round((t - t0) / hop), 0, len(env)))
 
-        body = env[idx(s):max(idx(e), idx(s) + 1)]
+        body = env[idx(s):idx(e)]
+        if len(body) == 0:
+            raise ValueError(f"segment {s}:{e} decoded to no audio (decoded {len(x) / sr:.3f} s from {t0:.3f} s)")
         speech = float(np.percentile(body, 90))
-        has_speech = speech - float(np.median(body)) >= MIN_SPEECH_SPREAD_DB
-        res = {"speech_p90_db": round(speech, 1), "has_speech": has_speech}
+        spread = speech - float(np.median(body))
+        res = {"speech_p90_db": round(speech, 1), "spread_db": round(spread, 1),
+               "has_speech": spread >= MIN_SPEECH_SPREAD_DB}
         for name, t in (("start", s), ("end", e)):
             win = env[idx(t - EDGE_WINDOW_S):max(idx(t + EDGE_WINDOW_S), idx(t - EDGE_WINDOW_S) + 1)]
             level = float(win.max())
@@ -108,11 +111,20 @@ def probe(path: str | Path) -> dict:
         n, _, d = (r or "0/1").partition("/")
         return round(float(n) / float(d or 1), 3) if float(d or 1) else 0.0
 
+    def raw_rate(stream):
+        for key in ("avg_frame_rate", "r_frame_rate"):
+            r = stream.get(key) or "0/0"
+            n, _, d = r.partition("/")
+            if float(n or 0) > 0 and float(d or 1) > 0:
+                return r
+        return None
+
     return {
         "duration_s": round(float(doc["format"]["duration"]), 3),
         "size_bytes": int(doc["format"].get("size", 0)),
         "video": None if v is None else {"codec": v["codec_name"], "profile": v.get("profile"), "pix_fmt": v.get("pix_fmt"),
-                                         "width": v["width"], "height": v["height"], "fps": rate(v.get("r_frame_rate"))},
+                                         "width": v["width"], "height": v["height"], "fps": rate(raw_rate(v)),
+                                         "fps_rational": raw_rate(v)},
         "audio": None if a is None else {"codec": a["codec_name"], "sample_rate": int(a["sample_rate"]), "channels": a["channels"]},
         "streams": [s["codec_type"] for s in doc["streams"]],
     }
@@ -165,23 +177,25 @@ def _audio_chain(n: int, tl: dict, crossfade: float, hold: float, fade_in: float
     cur = "a0"
     for i in range(1, n):
         if crossfade > 0:
-            f.append(f"[{cur}][a{i}]acrossfade=d={crossfade}:c1=tri:c2=tri[ax{i}]")
+            f.append(f"[{cur}][a{i}]acrossfade=d={crossfade}:c1=qsin:c2=qsin[ax{i}]")
         else:
             f.append(f"[{cur}][a{i}]concat=n=2:v=0:a=1[ax{i}]")
         cur = f"ax{i}"
-    tail = []
-    if hold > 0:
-        tail.append(f"apad=pad_dur={hold}")
+    # The fade-out ends where the source material ends (body_s); a hold adds silence after it.
+    # Fading over the hold instead would cut the bed off abruptly at body_s, since apad is silent.
+    tail = [f"atrim=0:{tl['body_s']:.4f}"]
     if fade_in > 0:
         tail.append(f"afade=t=in:st=0:d={fade_in}")
     if fade_out > 0:
-        tail.append(f"afade=t=out:st={max(0.0, tl['total_s'] - fade_out):.4f}:d={fade_out}")
+        tail.append(f"afade=t=out:st={max(0.0, tl['body_s'] - fade_out):.4f}:d={fade_out}")
+    if hold > 0:
+        tail.append(f"apad=pad_dur={hold}")
     tail.append(f"atrim=0:{tl['total_s']:.4f}")
     f.append(f"[{cur}]{','.join(tail)}[apre]")
     return f
 
 
-def _video_chain(n: int, tl: dict, fps: float, crossfade: float, hold: float, video_fade_out: float) -> list[str]:
+def _video_chain(n: int, tl: dict, fps: str, crossfade: float, hold: float, video_fade_out: float) -> list[str]:
     f = [f"[{i}:v:0]setpts=PTS-STARTPTS,fps={fps},settb=AVTB,format=yuv420p[v{i}]" for i in range(n)]
     cur = "v0"
     for i in range(1, n):
@@ -222,6 +236,23 @@ def _loudnorm_json(stderr: str) -> dict:
     return json.loads(stderr[start:end + 1])
 
 
+def lra_target(input_lra: float) -> int:
+    """loudnorm falls back to dynamic mode when the input's LRA exceeds the target LRA, so raise the target."""
+    return int(min(50, max(11, math.ceil(input_lra) + 1)))
+
+
+def linear_blockers(m1: dict, lufs: float, true_peak: float, lra: float) -> list[dict]:
+    """Conditions under which loudnorm's linear mode cannot hold (it then switches to dynamic)."""
+    reasons = []
+    tp_after = float(m1["input_tp"]) + (lufs - float(m1["input_i"]))
+    if tp_after > true_peak:
+        reasons.append({"condition": "true_peak", "input_tp": float(m1["input_tp"]), "input_i": float(m1["input_i"]),
+                        "true_peak_after_gain": round(tp_after, 2), "limit": true_peak})
+    if float(m1["input_lra"]) > lra:
+        reasons.append({"condition": "lra", "input_lra": float(m1["input_lra"]), "target_lra": lra})
+    return reasons
+
+
 def write_stills(clip: str | Path, stills_dir: str | Path, frames: int = 12, cols: int = 4) -> dict:
     """First frame, last frame, and a contact sheet of `frames` evenly spaced frames (first to last)."""
     clip, stills_dir = Path(clip), Path(stills_dir)
@@ -256,7 +287,7 @@ def cut_clip(
     lufs: float = -16.0,
     true_peak: float = -1.0,
     max_duration: float | None = 140.0,
-    crf: int = 18,
+    crf: int = 16,
     audio_bitrate: str = "192k",
     stills_dir: str | None = None,
     sheet_frames: int = 12,
@@ -279,7 +310,7 @@ def cut_clip(
     seg_reports = []
     for (s, e), m in zip(segments, margins):
         rep = {"start": s, "end": e, "duration_s": round(e - s, 3), "speech_p90_db": m["speech_p90_db"],
-               "has_speech": m["has_speech"]}
+               "spread_db": m["spread_db"], "has_speech": m["has_speech"]}
         for name, t in (("start", s), ("end", e)):
             edge = {"t": t, **m[name]}
             if cues is not None:
@@ -289,9 +320,12 @@ def cut_clip(
             if m["has_speech"] and edge["margin_db"] < MIN_EDGE_MARGIN_DB:
                 warnings.append({"type": "edge_in_speech", "t": t, "margin_db": edge["margin_db"]})
             rep[f"{name}_edge"] = edge
+        if not m["has_speech"]:
+            warnings.append({"type": "edge_check_skipped", "segment": [s, e], "spread_db": m["spread_db"],
+                             "reason": f"p90 - median below {MIN_SPEECH_SPREAD_DB} dB: no speech found, edges not checked"})
         seg_reports.append(rep)
 
-    fps = src["video"]["fps"] or 25
+    fps = src["video"]["fps_rational"] or "25"
     inputs = _inputs(media, segments)
     achain = _audio_chain(n, tl, crossfade, hold, fade_in, fade_out)
 
@@ -301,27 +335,32 @@ def cut_clip(
                "-f", "null", "-"], "loudness measurement")
     m1 = _loudnorm_json(p1.stderr)
 
-    # Pass 2: render with the measured values (linear gain when the true peak allows it).
-    norm = (f"loudnorm=I={lufs}:TP={true_peak}:LRA=11:measured_I={m1['input_i']}:measured_TP={m1['input_tp']}"
+    # Pass 2: render with the measured values (linear gain when the true peak and LRA allow it).
+    lra = lra_target(float(m1["input_lra"]))
+    norm = (f"loudnorm=I={lufs}:TP={true_peak}:LRA={lra}:measured_I={m1['input_i']}:measured_TP={m1['input_tp']}"
             f":measured_LRA={m1['input_lra']}:measured_thresh={m1['input_thresh']}:offset={m1['target_offset']}"
             f":linear=true:print_format=json,aresample=48000")
     graph = ";".join(_video_chain(n, tl, fps, crossfade, hold, video_fade_out) + achain) + f";[apre]{norm}[aout]"
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     p2 = _run(["ffmpeg", "-y", "-hide_banner", "-nostats", *inputs, "-filter_complex", graph,
-               "-map", "[vout]", "-map", "[aout]", "-sn", "-dn",
-               "-c:v", "libx264", "-profile:v", "high", "-preset", "medium", "-crf", str(crf), "-pix_fmt", "yuv420p",
+               "-map", "[vout]", "-map", "[aout]", "-map_metadata", "-1", "-map_chapters", "-1",
+               "-c:v", "libx264", "-profile:v", "high", "-preset", "medium", "-crf", str(crf),
+               "-pix_fmt", "yuv420p",
                "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "48000", "-ac", "2",
                "-movflags", "+faststart", str(out)], "clip render")
     normalization = _loudnorm_json(p2.stderr).get("normalization_type")
     if normalization != "linear":
         warnings.append({"type": "loudnorm_not_linear", "normalization_type": normalization,
-                         "hint": "true peak would exceed the limit at linear gain; lower --lufs or accept dynamic"})
+                         "reasons": linear_blockers(m1, lufs, true_peak, lra),
+                         "hint": "true_peak: lower --lufs or raise --true-peak; lra: the material is very dynamic"})
 
     res = probe(out)
     loud = measure_loudness(out)
     fast = is_faststart(out)
     if not fast:
         warnings.append({"type": "not_faststart"})
+    if res["streams"] != ["video", "audio"]:
+        warnings.append({"type": "extra_streams", "streams": res["streams"]})
     if max_duration is not None and res["duration_s"] > max_duration:
         warnings.append({"type": "over_max_duration", "duration_s": res["duration_s"], "max_duration_s": max_duration})
     if abs(res["duration_s"] - tl["total_s"]) > 0.15:
@@ -341,7 +380,8 @@ def cut_clip(
         "streams": res["streams"],
         "faststart": fast,
         "loudness": loud,
-        "loudness_target": {"integrated_lufs": lufs, "true_peak_dbfs": true_peak, "normalization_type": normalization},
+        "loudness_target": {"integrated_lufs": lufs, "true_peak_dbfs": true_peak, "lra": lra,
+                            "normalization_type": normalization},
         "stills": stills,
         "warnings": warnings,
     }
