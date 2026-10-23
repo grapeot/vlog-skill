@@ -189,3 +189,84 @@ def test_loudnorm_linear_blockers():
     assert [r["condition"] for r in tp] == ["true_peak"] and tp[0]["true_peak_after_gain"] == -0.5
     lra = linear_blockers({**m, "input_lra": "15.0"}, -16.0, -1.0, 11)
     assert [r["condition"] for r in lra] == ["lra"]
+
+
+def test_output_loudness_is_checked_against_the_target(tmp_path, capsys):
+    """A source with peaks near full scale cannot reach -10 LUFS under a -1 dBTP ceiling."""
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=5",
+         "-f", "lavfi", "-i", "aevalsrc=0.05*sin(2*PI*220*t)+0.95*lt(mod(t\\,0.25)\\,0.002):s=48000:d=5",
+         "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(tmp_path / "hot.mp4")],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    rc = cli.main(["clip", str(tmp_path / "hot.mp4"), "--out", str(tmp_path / "loud.mp4"), "--segment", "0.5:4.5",
+                   "--lufs", "-10", "--sheet-frames", "0"])
+    d = json.loads(capsys.readouterr().out)["data"]
+    assert rc == 0
+    off = [w for w in d["warnings"] if w["type"] == "loudness_off_target"]
+    assert off and off[0]["target_lufs"] == -10.0 and abs(off[0]["integrated_lufs"] + 10) > 0.5
+
+
+def test_true_peak_over_is_reported(monkeypatch, video, capsys):
+    import vlog_skill.clip as clip
+
+    real = clip.measure_loudness
+    monkeypatch.setattr(clip, "measure_loudness", lambda p: {**real(p), "true_peak_dbfs": 0.7})
+    rc = cli.main(["clip", str(video / "film.mp4"), "--out", str(video / "out" / "tp.mp4"), "--segment", "0.3:2.7",
+                   "--sheet-frames", "0"])
+    d = json.loads(capsys.readouterr().out)["data"]
+    assert rc == 0
+    tp = [w for w in d["warnings"] if w["type"] == "true_peak_over"]
+    assert tp and tp[0]["limit_dbfs"] == -1.0 and tp[0]["true_peak_dbfs"] == 0.7
+
+
+def _rgb(png):
+    proc = subprocess.run(["ffmpeg", "-v", "error", "-i", str(png), "-vf", "scale=160:90", "-f", "rawvideo",
+                           "-pix_fmt", "rgb24", "-"], capture_output=True)
+    assert proc.returncode == 0, proc.stderr
+    return np.frombuffer(proc.stdout, np.uint8).reshape(90, 160, 3).astype(np.float64)
+
+
+def test_end_card_from_a_source_frame(video, capsys):
+    from vlog_skill.audio import load_audio
+
+    out = video / "out" / "card.mp4"
+    rc = cli.main(["clip", str(video / "film.mp4"), "--out", str(out), "--segment", "2.7:5.1",
+                   "--srt", str(video / "film.srt"), "--hold-end", "0.5", "--end-card", "0.2",
+                   "--end-card-duration", "1.5", "--sheet-frames", "2"])
+    d = json.loads(capsys.readouterr().out)["data"]
+    assert rc == 0, d
+    assert d["warnings"] == []
+    assert d["end_card"]["kind"] == "source_frame" and d["end_card"]["starts_at_s"] == pytest.approx(2.4)
+    assert d["expected_duration_s"] == pytest.approx(2.4 + 0.5 + 1.5)
+    assert abs(d["duration_s"] - d["expected_duration_s"]) < 0.15
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", "0.2", "-i", str(video / "film.mp4"), "-frames:v", "1",
+                    str(video / "src_0.2.png")], check=True)
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", "5.0", "-i", str(video / "film.mp4"), "-frames:v", "1",
+                    str(video / "src_5.0.png")], check=True)
+    last = _rgb(d["stills"]["last"])
+    assert np.abs(last - _rgb(video / "src_0.2.png")).mean() < 6           # the card
+    assert np.abs(last - _rgb(video / "src_5.0.png")).mean() > 2 * np.abs(last - _rgb(video / "src_0.2.png")).mean()
+    x = load_audio(out, 48000, 1)
+    card = x[int(3.0 * 48000):int(4.3 * 48000)]
+    assert 20 * np.log10(np.sqrt(np.mean(card.astype(np.float64) ** 2)) + 1e-9) < -70  # card is silent
+
+
+def test_end_card_image_and_warnings(video, capsys):
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=160x90", "-frames:v", "1",
+                    str(video / "logo.png")], check=True)
+    rc = cli.main(["clip", str(video / "film.mp4"), "--out", str(video / "out" / "img.mp4"), "--segment", "2.7:5.1",
+                   "--end-card", str(video / "logo.png"), "--end-card-duration", "1.0", "--sheet-frames", "2"])
+    d = json.loads(capsys.readouterr().out)["data"]
+    assert rc == 0 and d["end_card"]["kind"] == "image"
+    r, g, b = _rgb(d["stills"]["last"])[45, 80]
+    assert r > 200 and g < 60 and b < 60
+
+    rc = cli.main(["clip", str(video / "film.mp4"), "--out", str(video / "out" / "cue.mp4"), "--segment", "2.7:5.1",
+                   "--srt", str(video / "film.srt"), "--end-card", "1.0", "--sheet-frames", "0"])
+    d = json.loads(capsys.readouterr().out)["data"]
+    assert "end_card_inside_cue" in {w["type"] for w in d["warnings"]}
+
+    rc = cli.main(["clip", str(video / "film.mp4"), "--out", str(video / "x.mp4"), "--segment", "2.7:5.1",
+                   "--end-card", "99"])
+    assert rc == cli.EXIT_INPUT and json.loads(capsys.readouterr().out)["error"]["type"] == "ValueError"

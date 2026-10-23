@@ -140,6 +140,7 @@ def cmd_clip(a) -> dict:
     from .clip import cut_clip, parse_segments
 
     return cut_clip(a.video, a.out, parse_segments(a.segment), srt=a.srt, crossfade=a.crossfade, hold=a.hold_end,
+                    end_card=a.end_card, end_card_s=a.end_card_duration, end_card_crossfade=a.end_card_crossfade,
                     fade_in=a.fade_in, fade_out=a.fade_out, video_fade_out=a.video_fade_out, lufs=a.lufs,
                     true_peak=a.true_peak, max_duration=a.max_duration or None, crf=a.crf,
                     audio_bitrate=a.audio_bitrate, stills_dir=a.stills_dir, sheet_frames=a.sheet_frames)
@@ -227,6 +228,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--crossfade", type=float, default=0.3, help="picture and sound crossfade between segments")
     s.add_argument("--hold-end", type=float, default=0.0,
                    help="hold the last frame this long over silence; the audio fade-out ends before the hold")
+    s.add_argument("--end-card", help="close on a branded card: a time in seconds on the source clock (e.g. the "
+                   "title card, fully faded in) or an image path; shown after a crossfade, over silence")
+    s.add_argument("--end-card-duration", type=float, default=2.5, help="seconds the card is fully visible")
+    s.add_argument("--end-card-crossfade", type=float, default=0.5)
     s.add_argument("--fade-in", type=float, default=0.15)
     s.add_argument("--fade-out", type=float, default=0.5)
     s.add_argument("--video-fade-out", type=float, default=0.0)

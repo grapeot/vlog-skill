@@ -1,7 +1,8 @@
 """Cut a short distribution clip from a finished video.
 
 A clip is one or more source segments joined with a short crossfade, faded in and out (the fade-out
-ends where the source material ends), optionally held on its last frame over silence, loudness-normalised in two passes (linear when the true peak allows), and
+ends where the source material ends), optionally held on its last frame over silence and closed on a
+branded end card (an image, or a frame of the source such as its title card) reached by a crossfade, loudness-normalised in two passes (linear when the true peak allows), and
 encoded as H.264 High / yuv420p / AAC with the moov atom at the front. The command also reports, for
 every segment edge, whether it falls inside a subtitle cue and how far the audio at the edge sits below
 the segment's speech level (a music bed keeps absolute levels high, so the margin is relative), and it
@@ -157,8 +158,28 @@ def is_faststart(path: str | Path) -> bool:
     return "moov" in boxes and "mdat" in boxes and boxes.index("moov") < boxes.index("mdat")
 
 
-def timeline(segments: list[tuple[float, float]], crossfade: float, hold: float) -> dict:
-    """Output length and xfade offsets for segments joined with a crossfade of `crossfade` seconds."""
+def parse_end_card(spec: str | None) -> dict | None:
+    """'1.5' (or 't=1.5') -> a frame of the source at 1.5 s; anything else -> an image path."""
+    if not spec:
+        return None
+    raw = spec[2:] if spec.startswith("t=") else spec
+    try:
+        t = float(raw)
+    except ValueError:
+        require_file(spec)
+        return {"kind": "image", "path": spec}
+    if t < 0:
+        raise ValueError(f"--end-card time must be >= 0, got {spec!r}")
+    return {"kind": "source_frame", "t": t}
+
+
+def timeline(segments: list[tuple[float, float]], crossfade: float, hold: float,
+             card_s: float = 0.0, card_crossfade: float = 0.0) -> dict:
+    """Output length and xfade offsets for segments joined with a crossfade of `crossfade` seconds.
+
+    With an end card, the card crossfades in over the last `card_crossfade` seconds of body + hold and
+    then stays fully visible for `card_s` seconds, so total = body + hold + card_s.
+    """
     durs = [e - s for s, e in segments]
     if len(durs) > 1 and crossfade > 0 and min(durs) <= crossfade:
         raise ValueError(f"every segment must be longer than the crossfade ({crossfade} s)")
@@ -169,7 +190,15 @@ def timeline(segments: list[tuple[float, float]], crossfade: float, hold: float)
             length += d - crossfade
         else:
             length += d
-    return {"durations": durs, "xfade_offsets": offsets, "body_s": length, "total_s": length + hold}
+    tl = {"durations": durs, "xfade_offsets": offsets, "body_s": length, "total_s": length + hold}
+    if card_s > 0:
+        if card_crossfade >= length + hold:
+            raise ValueError(f"the end-card crossfade ({card_crossfade} s) must be shorter than the clip before it")
+        tl["card_offset"] = round(length + hold - card_crossfade, 4)
+        tl["card_input_s"] = card_s + card_crossfade
+        tl["card_crossfade"] = card_crossfade
+        tl["total_s"] = length + hold + card_s
+    return tl
 
 
 def _audio_chain(n: int, tl: dict, crossfade: float, hold: float, fade_in: float, fade_out: float) -> list[str]:
@@ -188,14 +217,15 @@ def _audio_chain(n: int, tl: dict, crossfade: float, hold: float, fade_in: float
         tail.append(f"afade=t=in:st=0:d={fade_in}")
     if fade_out > 0:
         tail.append(f"afade=t=out:st={max(0.0, tl['body_s'] - fade_out):.4f}:d={fade_out}")
-    if hold > 0:
-        tail.append(f"apad=pad_dur={hold}")
+    if tl["total_s"] > tl["body_s"]:
+        tail.append(f"apad=whole_dur={tl['total_s']:.4f}")  # hold and end card are silent
     tail.append(f"atrim=0:{tl['total_s']:.4f}")
     f.append(f"[{cur}]{','.join(tail)}[apre]")
     return f
 
 
-def _video_chain(n: int, tl: dict, fps: str, crossfade: float, hold: float, video_fade_out: float) -> list[str]:
+def _video_chain(n: int, tl: dict, fps: str, crossfade: float, hold: float, video_fade_out: float,
+                 size: tuple[int, int] | None = None) -> list[str]:
     f = [f"[{i}:v:0]setpts=PTS-STARTPTS,fps={fps},settb=AVTB,format=yuv420p[v{i}]" for i in range(n)]
     cur = "v0"
     for i in range(1, n):
@@ -207,6 +237,13 @@ def _video_chain(n: int, tl: dict, fps: str, crossfade: float, hold: float, vide
     tail = []
     if hold > 0:
         tail.append(f"tpad=stop_mode=clone:stop_duration={hold}")
+    if "card_offset" in tl:  # input n is the end-card still, looped for card_input_s
+        w, h = size
+        f.append(f"[{cur}]{','.join(tail) or 'null'}[vbody]")
+        f.append(f"[{n}:v:0]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
+                 f"setsar=1,fps={fps},settb=AVTB,format=yuv420p[vcard]")
+        f.append(f"[vbody][vcard]xfade=transition=fade:duration={tl['card_crossfade']}:offset={tl['card_offset']}[vwc]")
+        cur, tail = "vwc", []
     if video_fade_out > 0:
         tail.append(f"fade=t=out:st={max(0.0, tl['total_s'] - video_fade_out):.4f}:d={video_fade_out}")
     tail.append(f"trim=0:{tl['total_s']:.4f}")
@@ -219,6 +256,14 @@ def _inputs(media: str, segments: list[tuple[float, float]]) -> list[str]:
     for s, e in segments:
         args += ["-ss", f"{s:.4f}", "-t", f"{e - s:.4f}", "-i", str(media)]
     return args
+
+
+def _render(inputs: list[str], graph: str, crf: int, audio_bitrate: str, out: str) -> subprocess.CompletedProcess:
+    return _run(["ffmpeg", "-y", "-hide_banner", "-nostats", *inputs, "-filter_complex", graph,
+                 "-map", "[vout]", "-map", "[aout]", "-map_metadata", "-1", "-map_chapters", "-1",
+                 "-c:v", "libx264", "-profile:v", "high", "-preset", "medium", "-crf", str(crf),
+                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "48000", "-ac", "2",
+                 "-movflags", "+faststart", str(out)], "clip render")
 
 
 def _run(cmd: list[str], what: str) -> subprocess.CompletedProcess:
@@ -281,6 +326,9 @@ def cut_clip(
     srt: str | None = None,
     crossfade: float = 0.3,
     hold: float = 0.0,
+    end_card: str | None = None,
+    end_card_s: float = 2.5,
+    end_card_crossfade: float = 0.5,
     fade_in: float = 0.15,
     fade_out: float = 0.5,
     video_fade_out: float = 0.0,
@@ -302,7 +350,10 @@ def cut_clip(
             raise ValueError(f"segment {s}:{e} ends after the source ({src['duration_s']} s)")
     n = len(segments)
     crossfade = crossfade if n > 1 else 0.0
-    tl = timeline(segments, crossfade, hold)
+    card = parse_end_card(end_card)
+    if card and card["kind"] == "source_frame" and card["t"] > src["duration_s"]:
+        raise ValueError(f"--end-card time {card['t']} s is after the end of the source ({src['duration_s']} s)")
+    tl = timeline(segments, crossfade, hold, end_card_s if card else 0.0, end_card_crossfade if card else 0.0)
     warnings = []
 
     cues = parse_srt(Path(srt).read_text(encoding="utf-8")) if srt else None
@@ -324,6 +375,10 @@ def cut_clip(
             warnings.append({"type": "edge_check_skipped", "segment": [s, e], "spread_db": m["spread_db"],
                              "reason": f"p90 - median below {MIN_SPEECH_SPREAD_DB} dB: no speech found, edges not checked"})
         seg_reports.append(rep)
+    if card and card["kind"] == "source_frame" and cues is not None:
+        where = edge_against_cues(card["t"], cues)
+        if where["inside_cue"]:
+            warnings.append({"type": "end_card_inside_cue", "t": card["t"], "cue": where["cue"]})
 
     fps = src["video"]["fps_rational"] or "25"
     inputs = _inputs(media, segments)
@@ -340,14 +395,19 @@ def cut_clip(
     norm = (f"loudnorm=I={lufs}:TP={true_peak}:LRA={lra}:measured_I={m1['input_i']}:measured_TP={m1['input_tp']}"
             f":measured_LRA={m1['input_lra']}:measured_thresh={m1['input_thresh']}:offset={m1['target_offset']}"
             f":linear=true:print_format=json,aresample=48000")
-    graph = ";".join(_video_chain(n, tl, fps, crossfade, hold, video_fade_out) + achain) + f";[apre]{norm}[aout]"
+    size = (src["video"]["width"], src["video"]["height"])
+    graph = (";".join(_video_chain(n, tl, fps, crossfade, hold, video_fade_out, size) + achain)
+             + f";[apre]{norm}[aout]")
     Path(out).parent.mkdir(parents=True, exist_ok=True)
-    p2 = _run(["ffmpeg", "-y", "-hide_banner", "-nostats", *inputs, "-filter_complex", graph,
-               "-map", "[vout]", "-map", "[aout]", "-map_metadata", "-1", "-map_chapters", "-1",
-               "-c:v", "libx264", "-profile:v", "high", "-preset", "medium", "-crf", str(crf),
-               "-pix_fmt", "yuv420p",
-               "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "48000", "-ac", "2",
-               "-movflags", "+faststart", str(out)], "clip render")
+    with tempfile.TemporaryDirectory() as tmp:
+        card_inputs = []
+        if card:
+            still = card["path"] if card["kind"] == "image" else str(Path(tmp) / "end_card.png")
+            if card["kind"] == "source_frame":
+                _run(["ffmpeg", "-y", "-v", "error", "-ss", f"{card['t']:.4f}", "-i", str(media), "-frames:v", "1",
+                      still], "end-card frame")
+            card_inputs = ["-loop", "1", "-framerate", fps, "-t", f"{tl['card_input_s']:.4f}", "-i", still]
+        p2 = _render(inputs + card_inputs, graph, crf, audio_bitrate, out)
     normalization = _loudnorm_json(p2.stderr).get("normalization_type")
     if normalization != "linear":
         warnings.append({"type": "loudnorm_not_linear", "normalization_type": normalization,
@@ -359,6 +419,10 @@ def cut_clip(
     fast = is_faststart(out)
     if not fast:
         warnings.append({"type": "not_faststart"})
+    if loud["integrated_lufs"] is None or abs(loud["integrated_lufs"] - lufs) > 0.5:
+        warnings.append({"type": "loudness_off_target", "integrated_lufs": loud["integrated_lufs"], "target_lufs": lufs})
+    if loud["true_peak_dbfs"] is None or loud["true_peak_dbfs"] > true_peak + 0.1:
+        warnings.append({"type": "true_peak_over", "true_peak_dbfs": loud["true_peak_dbfs"], "limit_dbfs": true_peak})
     if res["streams"] != ["video", "audio"]:
         warnings.append({"type": "extra_streams", "streams": res["streams"]})
     if max_duration is not None and res["duration_s"] > max_duration:
@@ -372,6 +436,8 @@ def cut_clip(
         "segments": seg_reports,
         "crossfade_s": crossfade,
         "hold_s": hold,
+        "end_card": None if not card else {**card, "duration_s": end_card_s, "crossfade_s": end_card_crossfade,
+                                           "starts_at_s": tl["card_offset"]},
         "expected_duration_s": round(tl["total_s"], 3),
         "duration_s": res["duration_s"],
         "size_bytes": res["size_bytes"],
