@@ -21,6 +21,7 @@ Produce a rendered explainer video in which the speaker delivers their own edite
 | `vlog subtitles` | Exercised in the first production | Punctuation-aware cues with a glossary; long clauses are cut near word boundaries |
 | Stage 14 (compose and render) | Exercised twice with project-local renderers | The CLI does not compose; the first production rendered 17.8 minutes of 1080p25 in about 100 s with 10 worker processes, tried a 1.1x speed change that the owner reverted after watching; the real-footage production composited screen recording, HTML canvas, camera picture-in-picture and subtitles at 1080p30 |
 | Stage 15 (final QA) | Exercised once (real footage) | A fresh-eyes review of about 120 sampled frames plus every shot boundary, and a mouth-motion lip-sync check, each caught defects the author had missed |
+| Stage 16 publish package (chapters, subtitles, title, handoff order) | Followed once (real footage) | Chapters, cleaned subtitles, title and thumbnail went to a video site, a community course page and YouTube, plus a clip to X; the human made every item public |
 | Stage 16 (distribution clips, `vlog clip`) | Exercised on two clips | One clip cut from each of the two productions and checked locally (edges, frames, re-transcription, loudness, end-of-clip levels); not yet posted, so nothing is known about how viewers respond |
 
 ### Boundaries and Responsibilities
@@ -31,7 +32,7 @@ Produce a rendered explainer video in which the speaker delivers their own edite
   1. **The agent cannot hear audio.** It measures loudness, energy envelopes, and transcripts. At every audio checkpoint, the agent must state plainly that a human must listen to judge delivery, pacing, and tone.
   2. **The agent never publishes anything.** Uploading or publishing to external video platforms is strictly out of scope.
   3. **No private data in version control.** Never commit audio recordings, transcripts, avatar videos, rendered outputs, API keys, personal names, or machine-specific paths.
-- **Out of scope**: Platform publishing (Stage 16 stops at files on disk), text-to-video generation, text-to-speech (TTS) voice cloning (the voice is always the human's own recording), and GUI non-linear editors (NLEs).
+- **Out of scope**: Platform publishing (Stage 16 stops at files on disk and a publish package; uploading is done by the human or by platform-specific tools), text-to-video generation, text-to-speech (TTS) voice cloning (the voice is always the human's own recording), and GUI non-linear editors (NLEs).
 
 ---
 
@@ -281,6 +282,20 @@ vlog clip render/final.mp4 --out render/clips/teaser.mp4 \
   --segment 1.2:3.05 --segment 87.05:155.2 \
   --srt render/final.srt --hold-end 0.5 --end-card 1.5 --end-card-duration 2.5
 ```
+
+#### Publish package for the finished film (handoff; publishing happens outside this skill)
+
+Publishing the film is not done by this skill, but the files a publish step needs are produced here, on the finished film's clock (after any title pre-roll or speed change from Stage 14), and handed to the human together with the clips.
+
+- **Artifacts**: `render/chapters.txt` (one `MM:SS title` line per chapter), `render/final.srt` and `render/final.vtt` (the cleaned subtitles from Stage 12, re-timed to the finished film), the title, and the thumbnail image.
+- **Chapters**: about 5 to 6 chapters for a film of about 25 minutes. Group by turns in the argument (where the question changes), not by every canvas section or map row; 10 or more chapters read as too many to the owner. Check each platform's chapter rules before handing over (for example, one video site caps a chapter title at 16 characters and the first chapter must start at 0).
+- **Subtitles everywhere**: the subtitles go up on every platform where the film is published (video site, community course page, YouTube), not only the first one. Some upload forms accept only `.srt`, some players want `.vtt`, so hand over both, generated from the same cleaned cues.
+- **Title**: keep the series title short and use the same one on every platform. The owner removed the subtitle-style second half after a colon on all platforms; put that framing in the description instead.
+- **Publishing order that worked (first real-footage production)**: each step was done by the human or by a separate platform-specific tool, and on every platform the human took the final public action.
+  1. Video site: the upload form was filled and handed to the human, who checked it and submitted.
+  2. Community course page: the lesson was created as a draft with the video, subtitles, chapters and thumbnail; the human published it.
+  3. X: a 60 to 140 s clip with a branded end card (see the acceptance criteria above) was scheduled through a scheduling tool. A scheduled post goes live without another click, so the clip, the post text and the time are approved by the human before scheduling.
+  4. YouTube: uploaded as private; the human made it public.
 
 ---
 
