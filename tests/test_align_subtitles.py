@@ -103,3 +103,25 @@ def test_latin_clause_never_exceeds_max_width():
     for mw in (8, 10, 12, 16):
         cues = build_cues(words, mw)
         assert all(_width(c["text"]) <= mw for c in cues), (mw, cues)
+
+
+def test_global_offset_finds_a_large_start_difference(tmp_path, capsys):
+    # the "camera" starts 3.5 s before the "screen": both hear the same room
+    rng = np.random.default_rng(7)
+    room = (0.05 * rng.standard_normal((int(20 * SR), 2))).astype(np.float32)
+    lead = int(3.5 * SR)
+    write_wav(tmp_path / "screen.wav", room[lead:lead + int(12 * SR)], SR)
+    write_wav(tmp_path / "cam.wav", room[: int(15 * SR)], SR)
+    assert cli.main(["offset", str(tmp_path / "screen.wav"), str(tmp_path / "cam.wav"), "--global", "--window", "3"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    data = out["data"]
+    assert out["ok"] and data["aligned"]
+    assert abs(data["start_delta_s"] + 3.5) < 0.002  # camera started earlier: negative
+    assert data["confidence"] > 3 and abs(data["drift_ms_per_min"]) < 1
+
+
+def test_offset_requires_at_without_global(tmp_path, capsys):
+    rec = make_recording(WORDS, 4.0)
+    write_wav(tmp_path / "a.wav", rec, SR)
+    assert cli.main(["offset", str(tmp_path / "a.wav"), str(tmp_path / "a.wav")]) != 0
+    assert not json.loads(capsys.readouterr().out)["ok"]

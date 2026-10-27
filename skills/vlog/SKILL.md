@@ -1,13 +1,13 @@
 ---
 name: vlog
-description: Produce a narrated talking-head explainer video end to end from a topic or raw idea with a human in the loop. Use this skill when researching a topic, drafting a spoken script, editing a human voice recording via word-level ASR and waveform silence analysis, verifying audio joins, generating a lip-synced avatar video with HeyGen, building a transcript-keyed storyboard and B-roll plan, or cutting short distribution clips from the finished video with the vlog CLI.
+description: Produce a narrated talking-head explainer video end to end from a topic or raw idea with a human in the loop. Use this skill when researching a topic, drafting a spoken script, editing a human voice recording via word-level ASR and waveform silence analysis, verifying audio joins, recording real camera footage alongside a screen recording of an AI agent session and synchronizing them by audio, generating a lip-synced avatar video with HeyGen, building a transcript-keyed storyboard and B-roll plan, or cutting short distribution clips from the finished video with the vlog CLI.
 ---
 
 # vlog Skill
 
 ## Goal and Scope
 
-Produce a rendered explainer video in which the speaker's own digital-twin avatar delivers the speaker's own edited voice-over, composited with B-roll (procedural animation, illustrations, screen recordings), subtitles, and a ducked music bed.
+Produce a rendered explainer video in which the speaker delivers their own edited voice-over, composited with B-roll (procedural animation, illustrations, screen recordings), subtitles, and a ducked music bed. The speaker appears either in real camera footage (the default since the third production) or as a digital-twin avatar driven by the edited audio. Live demos are recorded as a screen recording of an AI agent session, with the agent's own session log as a third, precisely timestamped track.
 
 ### Validation Status
 
@@ -15,6 +15,7 @@ Produce a rendered explainer video in which the speaker's own digital-twin avata
 | :--- | :--- | :--- |
 | Stages 1–9 (research, script, recording, transcription, edit, verify, listening) | Exercised in two productions | A ~18-minute Chinese technical explainer (`vlog edit` reproduces its edit sample for sample) and a ~15-minute one whose 28 cuts were specified by phrase and snapped to measured quiet runs; both verified clean |
 | Stage 10, HeyGen (web UI or official CLI with OAuth) | Exercised in two productions | Full-length render in the web UI; a 60-second test through the official CLI with OAuth; in the second production Video Agent was driven from a browser over CDP and could not select Avatar III (see "Avatar video with HeyGen") |
+| Stage 4 recording session with camera + screen + agent log, Stage 4b sync | Exercised on a 48 s test recording, then followed cold by a fresh agent with only this skill | `vlog offset --global` found the camera-to-screen start difference with zero drift; agent-log anchor, metadata start, and menu-bar clock rollover agreed within 0.15 s; the cold run reproduced all three numbers; not yet run on a full production |
 | Stage 11 (picture clock) | Exercised in the first production | `vlog offset` found 160 ms of drift in the Video Agent render; the picture is timed from its transcript |
 | Stages 12–13 (storyboard, look development, B-roll) | Exercised in the first production, second pass | A per-line illustration pass was rejected after a 3 min 52 s checkpoint; the second pass (argument-map canvas) covered the full film and went through one independent cognitive-load review before the owner's review |
 | `vlog subtitles` | Exercised in the first production | Punctuation-aware cues with a glossary; long clauses are cut near word boundaries |
@@ -77,12 +78,34 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
   4. **Cold-read check (independent agent context seeing only `writing/script.md`)**: The cold reader accurately restates the thesis and flags zero undefined terms or logic jumps. Iterate until the cold read passes.
 - **Advice (revising after a cold read)**: Asking the writer to add every missing explanation inside the same character budget compresses the prose into a telegraphic, note-like style that fails the next cold read for a new reason. In the second production it took four rounds; what fixed it was an editorial pass by the main agent before the rewrite: drop numbers that do not carry the argument (a range, a raw token count replaced by a ratio), replace benchmark codenames with plain labels ("budget, mid and flagship tier" for three model codenames), give each item its own paragraph with an explicit "first, second" bridge, compare like with like when two multiples appear back to back, and widen the budget slightly. Check that a cause given for a number actually accounts for it (a "four times the tokens" explanation placed after a "thirty times the cost" claim that compared a different baseline was caught only by the cold reader).
 
-### Stage 4: Voice Recording (Checkpoint 2)
-- **Goal**: Record the human speaker reading the script in one continuous session.
-- **Artifact**: `audio/raw/take1.m4a` (or `.wav`)
+### Stage 4: Recording Session (Checkpoint 2)
+- **Goal**: Record the speaker reading the script, plus, for live demos, the screen where the demo runs.
+- **Artifacts**: Voice-only: `audio/raw/take1.m4a` (or `.wav`). Real footage: `footage/camera.mov`, `footage/screen.mov`, and the agent session log copied to `logs/` (for example a Codex rollout JSONL).
 - **Acceptance Criteria**:
-  1. Audio file exists under `audio/raw/` and `ffprobe` reports a valid audio stream with duration > 0.
-- **Advice**: Instruct the speaker to record one continuous file using an external microphone if available. Going off-script and speaking retakes or editing instructions aloud (for example, "let me redo that" or "this part should be cut") are expected and handled in Stage 6.
+  1. Every file exists and `ffprobe` reports valid streams with duration > 0.
+  2. Real footage: the camera file and the screen recording both carry an audio track from the same microphone. Without a shared audio track the two cannot be aligned precisely in Stage 4b.
+  3. Real footage: a 5-second test recording was checked with `ffprobe` before the real take (resolution, frame rate, audio present). Camera apps can default to a low resolution.
+- **Advice**:
+  - Instruct the speaker to record one continuous take using an external microphone if available. Going off-script and speaking retakes or editing instructions aloud (for example, "let me redo that" or "this part should be cut") are expected and handled in Stage 6.
+  - Put the script on a screen that is not being recorded. If it can only sit on the recorded screen, agree on a spoken signal sentence before switching to the demo; Stage 6 uses it to find where the screen picture becomes usable.
+  - Let the human start both recordings by hand. Starting them from a script is not worth it: camera recording starts one to two seconds after the start command returns, so the logged start time is no better than what Stage 4b measures afterwards, and an agent process detached from the GUI session may lack screen-recording permission (macOS `screencapture` then exits silently).
+  - Screen recordings and agent logs can show keys, tokens, and private paths. Review them before rendering; never commit them.
+
+### Stage 4b: Sync (Real Footage Only)
+- **Goal**: Put the camera, the screen recording, and the agent log on one clock.
+- **Artifact**: `sync/offsets.json` with each track's start relative to the reference track (the screen recording), the measured drift, and the agent-log anchors used.
+- **Acceptance Criteria**:
+  1. Camera to screen: `vlog offset footage/screen.mov footage/camera.mov --global` reports `aligned: true` (confidence above 3, every refinement point's correlation above 0.9, residuals within tolerance). Record `start_delta_s` (camera start minus screen start; negative means the camera started first) and `drift_ms_per_min`.
+  2. Screen to wall clock: the screen recording's start time is taken from its container metadata (`ffprobe -show_entries format_tags=creation_time`), which QuickTime screen recordings set to the recording start with one-second resolution. Do not use the file name (it can be about a second earlier than the real start) or the camera file's metadata (QuickTime camera recordings store when the recording window opened and when the file was saved, not when recording started).
+  3. Agent log to screen: two anchors when the log allows, one near the start and one near the end, each a message the speaker sent to the agent. For each, the wall-clock send time comes from the log and the screen time from the frame where the message bubble appears in the chat (see Advice for how to find it). `screen_start = send_wall_time - send_screen_time` must agree between anchors and with the metadata start within one second. If the speaker sent only one message, use it, and check it against an independent clock (next item) instead of a second message.
+  4. Independent clock check: the menu-bar clock in the screen recording changes minute at a known wall time. The frame where it rolls over (frame differencing on a crop of the clock) gives `screen_start = HH:MM:00 - rollover_screen_time`. It should agree with the anchor estimate within about 0.2 s.
+  5. `sync/offsets.json` records, with the screen recording as reference: `reference` (path), `tracks` (each with `path`, `start_delta_s` from `vlog offset --global`, `drift_ms_per_min`, `confidence`), `screen_start_wall` (ISO 8601 with offset), `screen_start_sources` (metadata, each anchor, clock check, each with its estimate), and `anchors` (log field used, wall time, screen time).
+- **Advice**:
+  - Which log timestamp: not the time the message event is logged. In Codex rollout JSONL, ids are UUIDv7, whose first 48 bits are the creation time in Unix milliseconds. For the first message of a session, the session id's creation time matched the frame where the bubble appeared; the turn id was 0.65 s later, `task_started` about 0.7 s later, and the user-message event about 1.8 s later. For later messages in the same session use the turn id of that turn and expect it to run a little late (measured once; confirm with the clock check).
+  - Typed versus dictated messages: with voice dictation there are two visible moments, the send click (dictation UI disappears) and, about a second later, the bubble appearing once transcription finishes. The log's creation time matches the bubble, so anchor on the bubble frame.
+  - Finding the frame: predict it from the metadata start (`send_wall_time - screen_start`), then extract a ±5 s window at the source frame rate (60 fps for QuickTime screen recordings) as downscaled greyscale, cropped to the chat area: `ffmpeg -ss <t-5> -t 10 -i footage/screen.mov -vf "crop=<w>:<h>:<x>:<y>,scale=480:-1,format=gray" frames/f_%04d.png`. Rank frames by mean absolute difference from the previous frame and look at the stills at the top spikes before choosing.
+  - The metadata start has one-second resolution and should not be assumed to round down; treat the clock check and anchors as the precise sources and the metadata as a sanity check.
+  - With the screen as reference, `vlog offset --global` reports `reference_time = other_time + start_delta_s`, so screen_time = camera_time + start_delta_s, camera_time = screen_time - start_delta_s, and wall_time = screen_start + screen_time. The agent log then tells which screen stretches are waiting (installs, benchmark runs, polling) and can be sped up, and which carry results that must stay at real speed.
 
 ### Stage 5: Raw Transcription
 - **Goal**: Generate a word-level timestamped transcript of the raw recording.
@@ -107,6 +130,7 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
   - Read spoken self-directions carefully before cutting them; they contain explicit instructions from the speaker.
   - When a word to delete has no quiet gap on one side, expand the cut to delete a slightly larger surrounding phrase that has quiet gaps on both sides and leaves a grammatical sentence.
   - Preserve the speaker-approved pacing defaults in `edit/edit_plan.json`: keep natural pauses untouched, shorten only stalls exceeding the thresholds, and refill shortened pauses with room tone rather than digital silence.
+  - Real footage: the edit applies to every picture track, not only the audio. Write the plan on the reference clock (Stage 4b), apply each cut to camera and screen alike, and plan how each join looks while the speaker is on camera: a shortened pause becomes a jump cut, masked by default with a push-in or pull-out or a cut to the screen or canvas. Stretches where the script is visible on the recorded screen constrain only the picture: keep the audio, replace the screen picture.
 
 ### Stage 7: Render the Edit
 - **Goal**: Render the edited voice-over with equal-power crossfades and room-tone pads, and record the exact raw-to-output time mapping and loudness metrics.
@@ -136,7 +160,8 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
   3. Report states explicitly that the agent cannot hear audio and that the human must listen to verify pacing and delivery.
   4. Human approves the edited audio before Stage 10 proceeds.
 
-### Stage 10: Avatar Video Generation (Checkpoint 4)
+### Stage 10: Avatar Video Generation (Checkpoint 4; Avatar Route Only)
+- **Real footage**: skip this stage; the camera footage is the A-roll and Stage 4b already timed it.
 - **Goal**: Generate a talking-head video of the speaker's digital twin driven by `audio/edited.wav` (see "Avatar video with HeyGen" below; vlog-skill does not wrap HeyGen).
 - **Artifact**: `avatar/avatar.mp4`
 - **Acceptance Criteria**:
@@ -144,6 +169,7 @@ Stage order is strict only where a stage consumes a previous stage's artifact.
   2. The offset between the avatar video's audio track and `audio/edited.wav` is measured with `vlog offset` (Stage 11). It was 0 ms for a 60 s direct CLI render; a full-length Video Agent render drifted to -160 ms and finished 0.2 s short, so treat a duration mismatch near 0.2 s as drift to handle in Stage 11, not as a failure.
 
 ### Stage 11: Picture Clock
+- **Real footage**: the picture clock is the edited output time. Map it back through `edit/manifest.json` to the raw time of the recorded track, then through `sync/offsets.json` to camera and screen time. Transcribe the edited audio for cues; no avatar transcript is needed.
 - **Goal**: Establish a single timing reference that stays locked to the spoken words in `avatar/avatar.mp4` from start to end, accounting for any scene-stitching drift introduced by the avatar renderer.
 - **Artifact**: Offset measurements from `vlog offset`, and the picture-clock transcript plus resolved phrase timestamps from `vlog anchors` (derived from `avatar/avatar.mp4` whenever the avatar audio drifts from `audio/edited.wav`).
 - **Acceptance Criteria**:
@@ -258,7 +284,11 @@ Running `vlog init /path/to/project` creates the workspace outside the code repo
 │   ├── manifest.json
 │   ├── verify_report.json
 │   └── verify_report.md
-├── avatar/
+├── footage/             # real-footage route: camera.mov, screen.mov
+├── logs/                # agent session logs (never committed)
+├── sync/
+│   └── offsets.json
+├── avatar/              # avatar route only
 │   └── avatar.mp4
 ├── storyboard/
 │   ├── argument_map.md
@@ -286,6 +316,7 @@ Every `vlog` command prints a single JSON summary object to `stdout` and passes 
 | Render edited audio & manifest | `vlog edit <edit_plan.json>` | Implemented (v0.1) |
 | Audit joins & absent phrases | `vlog verify --manifest <manifest.json> --raw <raw.json> --edited <edited.json> --out <report.json> [--markdown <report.md>] [--expect-absent <phrase> ...] [--allow-double <XX> ...]` | Implemented (v0.1) |
 | Audio offset between two files at several points | `vlog offset <reference> <other> --at <s> [<s> ...]` | Implemented (v0.1), checked on the first production's renders |
+| Offset between recordings that started far apart (camera vs screen), with drift | `vlog offset <reference> <other> --global [--points 5] [--window 8]` | Implemented; checked on a 48 s camera + screen test |
 | Resolve spoken phrases to times | `vlog anchors <transcript.json> --phrase NAME=PHRASE [...] [--after <s>] [--until <s>]` | Implemented (v0.1) |
 | Generate SRT with glossary | `vlog subtitles <transcript.json> --glossary <glossary.json> --out <srt>` | Implemented (v0.1) |
 | Cut a distribution clip with edge checks and review stills | `vlog clip <video> --out <mp4> --segment START:END [...] [--srt <srt>] [--crossfade 0.3] [--hold-end <s>] [--end-card <seconds or image>] [--end-card-duration 2.5] [--lufs -16] [--true-peak -1] [--max-duration 140] [--sheet-frames 12]` | Implemented; used for the two clips of Stage 16 (one from each production) |
@@ -533,6 +564,10 @@ An agent can verify look development and rendering against these checks (the pla
 
 | # | Symptom | Root Cause | Remedy |
 | :--- | :--- | :--- | :--- |
+| R1 | Camera and screen recordings disagree by several seconds when lined up by their metadata times | QuickTime camera recordings store when the recording window opened and when the file was saved; screen recording file names can be about a second early | Align camera to screen by audio (`vlog offset --global`); take the screen start from `creation_time` and confirm it with agent-log anchors (Stage 4b). |
+| R2 | Saving a QuickTime camera recording from AppleScript fails with error -10000 | `save … in` is not supported for a new movie recording | Use `export (document 1) in (POSIX file …) using settings preset "1080p"`, or let the human save it. |
+| R3 | Agent-log anchors put the screen start about two seconds late | The logged user-message event is written after upload and processing | Use the UUIDv7 creation time of the session or turn id (Stage 4b advice). |
+| R4 | Camera A-roll is too soft for a full-frame talking head | The camera app recorded at its default low resolution | Check a 5-second test recording with `ffprobe` and raise the recording quality before the real take. |
 | 1 | Cut defined on token timestamps leaves a filler ("呃") or the first of two repeated syllables in `audio/edited.wav` | Forced-aligner timestamps are approximate right where cuts happen (a 260 ms filler was assigned 80 ms; a repeated syllable's audio was attributed to the preceding token) | Always place cut `start` and `end` inside quiet intervals measured on the waveform with `vlog quiet`, then confirm with `vlog verify`. `vlog edit` lists edges that still sit inside speech energy under `warnings`. |
 | 2 | Deleted syllable reappears at the edge of a kept island after rendering | Renderer pads island edges and extends them while energy stays high to protect consonants; unclamped extension reaches back into the cut region | Clamp edge-padding and high-energy extension in `edit.py` strictly to cut boundaries (`cuts[i].start` and `cuts[i].end`). |
 | 3 | Edited audio sounds breathless and unnatural to the speaker | Compressing all breath pauses to ~0.2 s destroys natural cadence | Use the speaker-approved pacing defaults: keep natural pauses below `pacing.keep_gap_s` untouched; only shorten long stalls and refill them with measured `room_tone`, never digital silence. |

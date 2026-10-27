@@ -115,9 +115,13 @@ def cmd_subtitles(a) -> dict:
 
 
 def cmd_offset(a) -> dict:
-    from .align import offsets
+    from .align import global_offset, offsets
 
-    return offsets(a.reference, a.other, a.at, a.window, a.tolerance_ms)
+    if a.global_search:
+        return global_offset(a.reference, a.other, a.points, a.window if a.window is not None else 8.0, a.tolerance_ms)
+    if not a.at:
+        raise ValueError("--at is required unless --global is given")
+    return offsets(a.reference, a.other, a.at, a.window if a.window is not None else 30.0, a.tolerance_ms)
 
 
 def cmd_anchors(a) -> dict:
@@ -207,8 +211,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("offset", help="audio offset between two media files at several points (cross-correlation)")
     s.add_argument("reference")
     s.add_argument("other")
-    s.add_argument("--at", type=float, nargs="+", required=True, help="start times in seconds")
-    s.add_argument("--window", type=float, default=30.0)
+    s.add_argument("--at", type=float, nargs="+", help="start times in seconds (files roughly aligned already)")
+    s.add_argument("--global", dest="global_search", action="store_true",
+                   help="files may start far apart (camera vs screen recording): search the whole overlap, refine, report drift")
+    s.add_argument("--points", type=int, default=5, help="refinement points for --global")
+    s.add_argument("--window", type=float, default=None, help="window seconds (default 30, or 8 with --global)")
     s.add_argument("--tolerance-ms", type=float, default=20.0)
     s.set_defaults(func=cmd_offset)
 
