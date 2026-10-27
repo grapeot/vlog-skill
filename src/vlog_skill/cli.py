@@ -115,9 +115,27 @@ def cmd_subtitles(a) -> dict:
 
 
 def cmd_offset(a) -> dict:
-    from .align import offsets
+    from .align import global_offset, offsets
 
-    return offsets(a.reference, a.other, a.at, a.window, a.tolerance_ms)
+    if a.global_search:
+        return global_offset(a.reference, a.other, a.points if a.points is not None else 5,
+                             a.window if a.window is not None else 8.0, a.tolerance_ms)
+    return offsets(a.reference, a.other, a.at, a.window if a.window is not None else 30.0, a.tolerance_ms)
+
+
+def _validate(parser, args) -> None:
+    """Argument combinations argparse cannot express; reported as usage errors."""
+    if getattr(args, "command", None) == "offset":
+        if args.global_search and args.at:
+            parser.error("offset: give either --at or --global, not both")
+        if not args.global_search and not args.at:
+            parser.error("offset: --at is required unless --global is given")
+        if args.points is not None and not args.global_search:
+            parser.error("offset: --points only applies with --global")
+        if args.points is not None and args.points < 1:
+            parser.error("offset: --points must be at least 1")
+        if args.window is not None and args.window <= 0:
+            parser.error("offset: --window must be positive")
 
 
 def cmd_anchors(a) -> dict:
@@ -207,8 +225,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("offset", help="audio offset between two media files at several points (cross-correlation)")
     s.add_argument("reference")
     s.add_argument("other")
-    s.add_argument("--at", type=float, nargs="+", required=True, help="start times in seconds")
-    s.add_argument("--window", type=float, default=30.0)
+    s.add_argument("--at", type=float, nargs="+", help="start times in seconds (files roughly aligned already)")
+    s.add_argument("--global", dest="global_search", action="store_true",
+                   help="files may start far apart (camera vs screen recording): search the whole overlap, refine, report drift")
+    s.add_argument("--points", type=int, default=None, help="refinement points for --global (default 5)")
+    s.add_argument("--window", type=float, default=None, help="window seconds (default 30, or 8 with --global)")
     s.add_argument("--tolerance-ms", type=float, default=20.0)
     s.set_defaults(func=cmd_offset)
 
@@ -250,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
+        _validate(parser, args)
     except UsageError as exc:
         _emit("vlog", error={"type": "UsageError", "message": str(exc), "details": None})
         return EXIT_USAGE

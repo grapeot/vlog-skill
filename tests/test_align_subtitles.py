@@ -103,3 +103,100 @@ def test_latin_clause_never_exceeds_max_width():
     for mw in (8, 10, 12, 16):
         cues = build_cues(words, mw)
         assert all(_width(c["text"]) <= mw for c in cues), (mw, cues)
+
+
+def _speechlike(seconds: float, seed: int) -> np.ndarray:
+    """Noise bursts with a syllable-like envelope, so the energy envelope has structure."""
+    rng = np.random.default_rng(seed)
+    n = int(seconds * SR)
+    spec = np.fft.rfft(rng.standard_normal(n))
+    spec[np.fft.rfftfreq(n, 1.0 / SR) > 2000] = 0.0  # speech-like band: sub-sample shifts stay correlated
+    x = np.fft.irfft(spec, n)
+    x /= x.std()
+    env = np.zeros(n)
+    t = 0
+    while t < n:
+        dur = int(rng.uniform(0.08, 0.35) * SR)
+        env[t:t + dur] = rng.uniform(0.2, 1.0)
+        t += dur + int(rng.uniform(0.03, 0.4) * SR)
+    return (0.1 * x * env).astype(np.float32)
+
+
+def _global(capsys, ref, other, *extra):
+    code = cli.main(["offset", str(ref), str(other), "--global", *extra])
+    return code, json.loads(capsys.readouterr().out)
+
+
+def test_global_offset_finds_a_large_start_difference(tmp_path, capsys):
+    room = _speechlike(40, 7)
+    lead = int(3.5 * SR)  # the "camera" starts 3.5 s before the "screen"
+    write_wav(tmp_path / "screen.wav", np.stack([room[lead:lead + 30 * SR]] * 2, 1), SR)
+    write_wav(tmp_path / "cam.wav", np.stack([room[: 34 * SR]] * 2, 1), SR)
+    code, out = _global(capsys, tmp_path / "screen.wav", tmp_path / "cam.wav")
+    data = out["data"]
+    assert code == 0 and data["aligned"], data
+    assert abs(data["start_delta_s"] + 3.5) < 0.002  # camera started earlier: negative
+    assert data["confidence"] > 3 and abs(data["drift_ms_per_min"]) < 1
+
+
+def test_global_offset_positive_delta_with_hum(tmp_path, capsys):
+    room = _speechlike(45, 11)
+    t = np.arange(len(room)) / SR
+    hum = (0.2 * np.sin(2 * np.pi * 60 * t)).astype(np.float32)  # mains hum stronger than the speech
+    write_wav(tmp_path / "ref.wav", np.stack([room[:35 * SR] + hum[:35 * SR]] * 2, 1), SR)
+    later = int(5.0 * SR)  # other starts 5 s after the reference
+    write_wav(tmp_path / "other.wav", np.stack([room[later:later + 30 * SR] + hum[:30 * SR]] * 2, 1), SR)
+    code, out = _global(capsys, tmp_path / "ref.wav", tmp_path / "other.wav")
+    data = out["data"]
+    assert data["aligned"], data
+    assert abs(data["start_delta_s"] - 5.0) < 0.002
+
+
+def test_global_offset_measures_drift(tmp_path, capsys):
+    room = _speechlike(130, 3)
+    ref = room[: 120 * SR]
+    # other runs 50 ppm fast and starts 2 s after the reference
+    t_other = 2.0 + np.arange(int(110 * SR)) / SR * (1 + 50e-6)
+    other = np.interp(t_other, np.arange(len(room)) / SR, room).astype(np.float32)
+    write_wav(tmp_path / "ref.wav", np.stack([ref] * 2, 1), SR)
+    write_wav(tmp_path / "other.wav", np.stack([other] * 2, 1), SR)
+    code, out = _global(capsys, tmp_path / "ref.wav", tmp_path / "other.wav", "--points", "6")
+    data = out["data"]
+    assert data["aligned"], data
+    assert abs(data["start_delta_s"] - 2.0) < 0.003
+    assert abs(data["drift_ms_per_min"] - 3.0) < 0.5  # 50 ppm = 3 ms per minute
+
+
+def test_global_offset_rejects_unrelated_recordings(tmp_path, capsys):
+    write_wav(tmp_path / "a.wav", np.stack([_speechlike(30, 1)] * 2, 1), SR)
+    write_wav(tmp_path / "b.wav", np.stack([_speechlike(30, 2)] * 2, 1), SR)
+    code, out = _global(capsys, tmp_path / "a.wav", tmp_path / "b.wav")
+    assert code == 0 and not out["data"]["aligned"] and out["data"]["reason"]
+
+
+def test_global_offset_reports_short_overlap(tmp_path, capsys):
+    write_wav(tmp_path / "a.wav", np.stack([_speechlike(5, 1)] * 2, 1), SR)
+    code, out = _global(capsys, tmp_path / "a.wav", tmp_path / "a.wav")
+    assert not out["data"]["aligned"] and "window" in out["data"]["reason"]
+
+
+@pytest.mark.parametrize("args", [
+    [],                                   # neither --at nor --global
+    ["--at", "0.5", "--global"],          # both
+    ["--at", "0.5", "--points", "3"],     # --points without --global
+    ["--global", "--window", "0"],        # non-positive window
+])
+def test_offset_argument_combinations_are_usage_errors(tmp_path, capsys, args):
+    rec = make_recording(WORDS, 4.0)
+    write_wav(tmp_path / "a.wav", rec, SR)
+    code = cli.main(["offset", str(tmp_path / "a.wav"), str(tmp_path / "a.wav"), *args])
+    out = json.loads(capsys.readouterr().out)
+    assert code == cli.EXIT_USAGE and out["error"]["type"] == "UsageError"
+
+
+def test_offset_at_mode_through_cli_is_unchanged(tmp_path, capsys):
+    rec = make_recording(WORDS, 6.0)
+    write_wav(tmp_path / "a.wav", rec, SR)
+    assert cli.main(["offset", str(tmp_path / "a.wav"), str(tmp_path / "a.wav"), "--at", "0.5", "--window", "5"]) == 0
+    data = json.loads(capsys.readouterr().out)["data"]
+    assert data["aligned"] and abs(data["points"][0]["offset_ms"]) < 1
