@@ -6,7 +6,7 @@ import json
 from datetime import date
 from pathlib import Path
 
-LAYOUT = ["research", "writing", "audio/raw", "audio/music", "asr", "edit", "avatar", "storyboard", "subtitles", "broll", "render", "qa"]
+LAYOUT = ["research", "writing", "audio/raw", "audio/music", "asr", "edit", "footage", "logs", "sync", "avatar", "storyboard", "subtitles", "broll", "render", "qa"]
 
 
 def _inside_skill_repo(path: Path) -> Path | None:
