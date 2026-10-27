@@ -88,6 +88,16 @@ Use this checklist when running a full episode with a human in the loop. Every i
 - [ ] `storyboard/storyboard.md` is keyed to exact phrases in `asr/avatar.json` (what the speaker actually said), not `writing/script.md` (Pitfall 7).
 - [ ] Full-frame avatar stretches are kept short and every storyboard beat has clear visual content or typography.
 - [ ] Final rendered video passes contact-sheet inspection, stream duration alignment, final audio re-transcription check, and `-16` LUFS loudness check, and is reviewed by the human before any external use.
+- [ ] An independent fresh-eyes reviewer has looked at about 120 sampled frames plus every shot boundary, and its findings are fixed or listed for the human.
+
+### Real Footage (Stages 4–5, 11, 14–15)
+
+- [ ] The 5-second test recording shows speech on both the camera and the screen recording's audio; if the screen has system audio only, the dictation-meter sync was run at three or more anchors that agree within about 0.1 s, and the camera audio is the master clock (Pitfall R5).
+- [ ] `sync/offsets.json` records the method, the anchors with their correlations, the clock mapping as an equation, and each picture source's audio and video `start_time` (Pitfall R6).
+- [ ] The whole screen recording was scanned for script and other non-agent windows, and no frame of the film shows one (Pitfall R7).
+- [ ] The mouth-motion lip-sync check gives a best lag of about -0.05 to -0.1 s in every window checked.
+- [ ] Subtitles drop fillers and collapse stutters while keeping real reduplication; any numeric slip left in the audio is marked in its cue.
+- [ ] The final mux used `-t <duration>`, not `-shortest`, and the film's duration matches the program clock (Pitfall R11).
 
 ### Stage 16: Distribution Clips (optional)
 
